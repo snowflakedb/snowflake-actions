@@ -1,6 +1,6 @@
 ﻿# action.yml
-name: "Install Snowflake CLI"
-description: "Download and install snowflake-cli"
+name: "Snowflake Actions"
+description: "Snowflake CI/CD actions for GitHub. Plan, deploy, and test Snowflake projects from your workflows."
 branding:
   icon: "terminal"
   color: "blue"
