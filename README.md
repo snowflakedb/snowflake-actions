@@ -82,7 +82,7 @@ To set up WIF OIDC authentication, follow these steps:
            with:
              persist-credentials: false
          - name: Setup Snowflake cli
-           uses: snowflakedb/snowflake-cli-action@v2.0
+           uses: snowflakedb/snowflake-actions@v2.0
            with:
              use-oidc: true
              cli-version: "3.11"
@@ -128,7 +128,7 @@ To set up Snowflake credentials for a temporary connection, follow these steps.
     Example:
 
     ```yaml
-    - uses: snowflakedb/snowflake-cli-action@v1.5
+    - uses: snowflakedb/snowflake-actions@v1.5
       with:
         cli-version: "3.6.0"
     ```
@@ -192,7 +192,7 @@ To set up Snowflake credentials for a specific connection, follow these steps.
    Add the `default-config-file-path` parameter to the Snowflake CLI action step in your workflow file. This specifies the path to your `config.toml` file. For example:
 
    ```yaml
-   - uses: snowflakedb/snowflake-cli-action@v1
+   - uses: snowflakedb/snowflake-actions@v1
      with:
        cli-version: "3.6.0"
        default-config-file-path: "config.toml"
@@ -242,7 +242,7 @@ jobs:
       runs-on: ubuntu-latest
       steps:
          # Snowflake CLI installation
-         - uses: snowflakedb/snowflake-cli-action@v1.5
+         - uses: snowflakedb/snowflake-actions@v1.5
 
             # Use the CLI
          - name: Execute Snowflake CLI command
@@ -284,7 +284,7 @@ jobs:
           persist-credentials: false
 
         # Snowflake CLI installation
-      - uses: snowflakedb/snowflake-cli-action@v1.5
+      - uses: snowflakedb/snowflake-actions@v1.5
         with:
           default-config-file-path: "config.toml"
 
@@ -304,10 +304,10 @@ jobs:
 ### Install from a GitHub branch or tag
 
 To install Snowflake CLI from a specific branch, tag, or commit in the GitHub repository (for example, to test unreleased features or a fork), use the following configuration:
-This feature is available from snowflake-cli-action v1.6
+This feature is available in snowflake-actions v2 and later.
 
 ```yaml
-- uses: snowflakedb/snowflake-cli-action@v1.6
+- uses: snowflakedb/snowflake-actions@v2
   with:
     custom-github-ref: "feature/my-branch"   # or a tag/commit hash
 ```
