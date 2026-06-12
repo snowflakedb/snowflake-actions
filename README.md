@@ -38,7 +38,7 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 
 ## Authentication
 
-OIDC is the recommended method because it stores no secrets. Use key-pair or password authentication only when OIDC isn't an option.
+Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and password auth exist only as fallbacks for environments where OIDC isn't available.
 
 ### OIDC (recommended)
 
@@ -85,36 +85,9 @@ jobs:
         run: snow connection test -x
 ```
 
-### Key pair
+### Key pair or password (fallback)
 
-Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) (first [generate a key pair](https://docs.snowflake.com/en/user-guide/key-pair-auth)), then use either a named or a temporary connection.
-
-**Named connection**: commit a `config.toml` template (never the secrets) and override fields with `SNOWFLAKE_CONNECTIONS_<NAME>_<KEY>` env vars:
-
-```toml
-# config.toml
-default_connection_name = "dev"
-
-[connections.dev]
-```
-
-```yaml
-steps:
-  - uses: actions/checkout@v4   # to read config.toml
-    with:
-      persist-credentials: false
-  - uses: snowflakedb/snowflake-actions@v2
-    with:
-      default-config-file-path: "config.toml"
-  - env:
-      SNOWFLAKE_CONNECTIONS_DEV_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_CONNECTIONS_DEV_ACCOUNT: ${{ secrets.ACCOUNT }}
-      SNOWFLAKE_CONNECTIONS_DEV_USER: ${{ secrets.USER }}
-      SNOWFLAKE_CONNECTIONS_DEV_PRIVATE_KEY_RAW: ${{ secrets.PRIVATE_KEY }}
-    run: snow connection test
-```
-
-**Temporary connection**: skip `config.toml`, pass credentials via generic `SNOWFLAKE_<KEY>` env vars with `-x`. Best for quick, one-off steps:
+Use this only when OIDC isn't available. Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) (first [generate a key pair](https://docs.snowflake.com/en/user-guide/key-pair-auth)) and pass them as `SNOWFLAKE_*` environment variables:
 
 ```yaml
 steps:
@@ -127,15 +100,13 @@ steps:
     run: snow connection test -x
 ```
 
-> Set other connection parameters the same way: `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_SCHEMA`, and so on.
+> Set warehouse, database, role, etc. the same way: `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_SCHEMA`.
 >
 > If your private key is encrypted, also set `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
+>
+> To use a password instead (not recommended), drop `SNOWFLAKE_AUTHENTICATOR` and set `SNOWFLAKE_PASSWORD`.
 
-### Password
-
-Not recommended for production CI/CD. Drop the `AUTHENTICATOR` line from either key-pair example above and pass a password instead (`SNOWFLAKE_PASSWORD` or `SNOWFLAKE_CONNECTIONS_<NAME>_PASSWORD`). With MFA, enable [MFA caching](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-multi-factor-authentication-mfa).
-
-> Full connection options and env-var precedence: [Configure Snowflake CLI connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections).
+See [Configure Snowflake CLI connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections) for all options.
 
 ## Version pinning
 
@@ -164,7 +135,7 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 - **Prefer OIDC** over long-lived secrets, and pin the action to a commit SHA.
 - **Least-privilege permissions:** OIDC needs `id-token: write`; most jobs need only `contents: read`.
 - **Set `persist-credentials: false`** on `actions/checkout`.
-- **Never commit credentials.** Keep `config.toml` secret-free and inject via GitHub Secrets.
+- **Never commit credentials.** Inject them via GitHub Secrets at runtime.
 
 ## Support
 
