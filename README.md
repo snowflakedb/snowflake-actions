@@ -119,8 +119,6 @@ steps:
     run: snow connection test -x
 ```
 
-> `SNOWFLAKE_PRIVATE_KEY_RAW` must be the full PEM file content, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines.
->
 > Encrypted key? Add `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
 
 ### Password
