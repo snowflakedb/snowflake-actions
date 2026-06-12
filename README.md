@@ -38,7 +38,7 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 
 ## Authentication
 
-Pick one. **OIDC is recommended** (it's secretless).
+OIDC is the recommended method because it stores no secrets. Use key-pair or password authentication only when OIDC isn't an option.
 
 ### OIDC / workload identity federation (recommended)
 
@@ -49,7 +49,11 @@ GitHub issues a short-lived OIDC token that Snowflake validates directly, so no 
 ```sql
 CREATE USER <username>
   TYPE = SERVICE
-  WORKLOAD_IDENTITY = (TYPE = OIDC ISSUER = 'https://token.actions.githubusercontent.com' SUBJECT = '<your_subject>');
+  WORKLOAD_IDENTITY = (
+    TYPE = OIDC
+    ISSUER = 'https://token.actions.githubusercontent.com'
+    SUBJECT = '<your_subject>'
+  );
 ```
 
 **2. Add the workflow.** `id-token: write` is required to mint the token.
@@ -81,24 +85,24 @@ Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/securit
 
 ```toml
 # config.toml
-default_connection_name = "myconnection"
+default_connection_name = "dev"
 
-[connections.myconnection]
+[connections.dev]
 ```
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4        # required to read config.toml from your repo
+  - uses: actions/checkout@v4   # to read config.toml
     with:
       persist-credentials: false
   - uses: snowflakedb/snowflake-actions@v2
     with:
       default-config-file-path: "config.toml"
   - env:
-      SNOWFLAKE_CONNECTIONS_MYCONNECTION_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_CONNECTIONS_MYCONNECTION_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_CONNECTIONS_MYCONNECTION_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_CONNECTIONS_MYCONNECTION_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
+      SNOWFLAKE_CONNECTIONS_DEV_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_CONNECTIONS_DEV_ACCOUNT: ${{ secrets.ACCOUNT }}
+      SNOWFLAKE_CONNECTIONS_DEV_USER: ${{ secrets.USER }}
+      SNOWFLAKE_CONNECTIONS_DEV_PRIVATE_KEY_RAW: ${{ secrets.PRIVATE_KEY }}
     run: snow connection test
 ```
 
@@ -109,15 +113,15 @@ steps:
   - uses: snowflakedb/snowflake-actions@v2
   - env:
       SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
+      SNOWFLAKE_ACCOUNT: ${{ secrets.ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.USER }}
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.PRIVATE_KEY }}
     run: snow connection test -x
 ```
 
 > `SNOWFLAKE_PRIVATE_KEY_RAW` must be the full PEM file content, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines.
 >
-> Encrypted key? Add `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PRIVATE_KEY_PASSPHRASE }}`.
+> Encrypted key? Add `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
 
 ### Password
 
@@ -128,9 +132,9 @@ Not recommended for production CI/CD. Drop the `AUTHENTICATOR` line from either 
 ## Version pinning
 
 ```yaml
-- uses: snowflakedb/snowflake-actions@<sha>     # most secure: pin to a commit
-- uses: snowflakedb/snowflake-actions@v2.0.4    # exact patch release
-- uses: snowflakedb/snowflake-actions@v2        # floating major, gets v2.x updates
+- uses: snowflakedb/snowflake-actions@<sha>   # commit SHA (most secure)
+- uses: snowflakedb/snowflake-actions@v2.0.4  # exact patch
+- uses: snowflakedb/snowflake-actions@v2      # floating major
 ```
 
 ## Install from a branch, tag, or commit
