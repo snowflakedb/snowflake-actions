@@ -127,6 +127,8 @@ steps:
     run: snow connection test -x
 ```
 
+> Set other connection parameters the same way: `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_SCHEMA`, and so on.
+>
 > If your private key is encrypted, also set `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
 
 ### Password
