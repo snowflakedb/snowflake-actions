@@ -1,6 +1,6 @@
 # Snowflake Actions
 
-GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow — so you can deploy dbt, [DCM](https://docs.snowflake.com/en/developer-guide/snowflake-cli/dcm/overview), [Snowflake App Runtime](https://docs.snowflake.com/en/developer-guide/snowflake-app-runtime/about-snowflake-app-runtime), and Streamlit projects, run SQL, and automate any Snowflake CLI task from CI/CD.
+GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt, [DCM](https://docs.snowflake.com/en/developer-guide/snowflake-cli/dcm/overview), [Snowflake App Runtime](https://docs.snowflake.com/en/developer-guide/snowflake-app-runtime/about-snowflake-app-runtime), and Streamlit projects, run SQL, and automate any Snowflake CLI task from CI/CD.
 
 ## How it works
 
@@ -19,21 +19,21 @@ steps:
   - run: snow --version
 ```
 
-Connecting to Snowflake also needs auth — see [Authentication](#authentication). **Use OIDC.**
+Connecting to Snowflake also needs auth. See [Authentication](#authentication); **use OIDC.**
 
 ## Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-version` | latest | CLI version to install, e.g. `"3.20.0"` or `"3.20"`. Mutually exclusive with `custom-github-ref`. |
-| `use-oidc` | `false` | Authenticate with GitHub's OIDC token — no stored secrets. Needs CLI `3.11+` and `id-token: write`. |
+| `use-oidc` | `false` | Authenticate with GitHub's OIDC token (no stored secrets). Needs CLI `3.11+` and `id-token: write`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. Use `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` for a named connection. |
 | `default-config-file-path` | `./config.toml` | `config.toml` to install into `~/.snowflake/`. Skipped if the file is absent. |
-| `custom-github-ref` | — | Install from a branch/tag/commit of [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI. Mutually exclusive with `cli-version`. `v2+`. |
+| `custom-github-ref` | none | Install from a branch/tag/commit of [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI. Mutually exclusive with `cli-version`. `v2+`. |
 
 ## Authentication
 
-Pick one. **OIDC is recommended** — it's secretless.
+Pick one. **OIDC is recommended** (it's secretless).
 
 ### OIDC / workload identity federation (recommended)
 
@@ -72,7 +72,7 @@ jobs:
 
 Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) (first [generate a key pair](https://docs.snowflake.com/en/user-guide/key-pair-auth)), then use either a named or a temporary connection.
 
-**Named connection** — commit a `config.toml` template (never the secrets) and override fields with `SNOWFLAKE_CONNECTIONS_<NAME>_<KEY>` env vars:
+**Named connection**: commit a `config.toml` template (never the secrets) and override fields with `SNOWFLAKE_CONNECTIONS_<NAME>_<KEY>` env vars:
 
 ```toml
 # config.toml
@@ -97,7 +97,7 @@ steps:
     run: snow connection test
 ```
 
-**Temporary connection** — skip `config.toml`; pass credentials via generic `SNOWFLAKE_<KEY>` env vars with `-x`. Best for quick, one-off steps:
+**Temporary connection**: skip `config.toml`, pass credentials via generic `SNOWFLAKE_<KEY>` env vars with `-x`. Best for quick, one-off steps:
 
 ```yaml
 steps:
@@ -145,7 +145,7 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 - **Prefer OIDC** over long-lived secrets, and pin the action to a commit SHA.
 - **Least-privilege permissions:** OIDC needs `id-token: write`; most jobs need only `contents: read`.
 - **Set `persist-credentials: false`** on `actions/checkout`.
-- **Never commit credentials** — keep `config.toml` secret-free and inject via GitHub Secrets.
+- **Never commit credentials.** Keep `config.toml` secret-free and inject via GitHub Secrets.
 
 ## Support
 
