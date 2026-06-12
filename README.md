@@ -119,7 +119,7 @@ steps:
     run: snow connection test -x
 ```
 
-> Encrypted key? Add `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
+> If your private key is encrypted, also set `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
 
 ### Password
 
