@@ -44,7 +44,7 @@ OIDC is the recommended method because it stores no secrets. Use key-pair or pas
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
 
-**1. Create a service user in Snowflake.** See [Workload Identity Federation](https://docs.snowflake.com/en/user-guide/workload-identity-federation) for subject formats.
+**1. Create a service user in Snowflake** whose workload identity trusts your repo's GitHub OIDC tokens:
 
 ```sql
 CREATE USER <username>
@@ -55,6 +55,16 @@ CREATE USER <username>
     SUBJECT = '<your_subject>'
   );
 ```
+
+`SUBJECT` must match the claim GitHub emits for the workflow. Use one of these formats:
+
+| Subject format | Matches | Workflow requirement |
+|----------------|---------|----------------------|
+| `repo:<owner>/<repo>:ref:refs/heads/<branch>` | Push to the specified branch | `on: push`, without `environment:` on the job |
+| `repo:<owner>/<repo>:pull_request` | Any pull request event | `on: pull_request`, without `environment:` on the job |
+| `repo:<owner>/<repo>:environment:<name>` | Job targets a named GitHub environment | Job sets `environment: <name>` (must exist in repository settings) |
+
+See [GitHub's OIDC subject claims](https://docs.github.com/en/actions/reference/security/oidc#example-subject-claims) for the full list.
 
 **2. Add the workflow.** `id-token: write` is required to mint the token.
 
