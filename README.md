@@ -32,7 +32,7 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
 
 - `cli-version` and `custom-github-ref` are mutually exclusive.
-- `use-oidc` needs CLI `3.11+` and `id-token: write`; for a named connection set `oidc-token-name` to `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN`.
+- `use-oidc` needs CLI `3.11+` and `id-token: write`.
 - `custom-github-ref` installs from [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI, and requires action `v2+`.
 - `default-config-file-path` is skipped if the file is absent.
 
