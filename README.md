@@ -28,7 +28,7 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 | `cli-version` | latest | CLI version to install (e.g. `3.20.0`). |
 | `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
-| `default-config-file-path` | `./config.toml` | Path to a `config.toml` to install. |
+| `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
 
 - `cli-version` and `custom-github-ref` are mutually exclusive.
