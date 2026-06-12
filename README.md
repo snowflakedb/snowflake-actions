@@ -25,11 +25,16 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `cli-version` | latest | CLI version to install, e.g. `"3.20.0"` or `"3.20"`. Mutually exclusive with `custom-github-ref`. |
-| `use-oidc` | `false` | Authenticate with GitHub's OIDC token (no stored secrets). Needs CLI `3.11+` and `id-token: write`. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. Use `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` for a named connection. |
-| `default-config-file-path` | `./config.toml` | `config.toml` to install into `~/.snowflake/`. Skipped if the file is absent. |
-| `custom-github-ref` | none | Install from a branch/tag/commit of [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI. Mutually exclusive with `cli-version`. `v2+`. |
+| `cli-version` | latest | CLI version to install (e.g. `3.20.0`). |
+| `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
+| `default-config-file-path` | `./config.toml` | Path to a `config.toml` to install. |
+| `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
+
+- `cli-version` and `custom-github-ref` are mutually exclusive.
+- `use-oidc` needs CLI `3.11+` and `id-token: write`; for a named connection set `oidc-token-name` to `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN`.
+- `custom-github-ref` installs from [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI, and requires action `v2+`.
+- `default-config-file-path` is skipped if the file is absent.
 
 ## Authentication
 
