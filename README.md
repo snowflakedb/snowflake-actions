@@ -40,7 +40,7 @@ Connecting to Snowflake also needs auth. See [Authentication](#authentication); 
 
 OIDC is the recommended method because it stores no secrets. Use key-pair or password authentication only when OIDC isn't an option.
 
-### OIDC / workload identity federation (recommended)
+### OIDC (recommended)
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
 
