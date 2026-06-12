@@ -8,7 +8,7 @@ The action:
 
 1. Installs Python 3.11 and the `uv` package manager.
 2. Installs the Snowflake CLI in an isolated environment.
-3. Copies your `config.toml` into `~/.snowflake/`.
+3. Copies your `config.toml` into `~/.snowflake/` if present (skipped with a notice if the file doesn't exist).
 4. With `use-oidc: true`, fetches a GitHub OIDC token and sets the workload-identity environment variables.
 
 ## Quick start
@@ -110,6 +110,8 @@ steps:
     run: snow connection test -x
 ```
 
+> `SNOWFLAKE_PRIVATE_KEY_RAW` must be the full PEM file content, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines.
+>
 > Encrypted key? Add `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PRIVATE_KEY_PASSPHRASE }}`.
 
 ### Password
