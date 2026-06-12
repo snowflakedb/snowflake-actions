@@ -85,8 +85,6 @@ jobs:
         run: snow connection test -x
 ```
 
-> For a named connection instead of a temporary one, set `oidc-token-name: SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN`.
-
 ### Key pair
 
 Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) (first [generate a key pair](https://docs.snowflake.com/en/user-guide/key-pair-auth)), then use either a named or a temporary connection.
