@@ -9,6 +9,7 @@ name: Compatibility — latest Snowflake CLI
 # cross-repo release webhook. Daily cadence comfortably meets 48 h.
 
 on:
+  pull_request:
   schedule:
     # 06:17 UTC — slightly off the hour to avoid GitHub-Actions cron spikes.
     - cron: '17 6 * * *'
