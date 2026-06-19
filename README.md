@@ -7,7 +7,7 @@ GitHub Action that installs and configures the [Snowflake CLI](https://docs.snow
 The action:
 
 1. Installs `uv`.
-2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps; this does not change the job's Python version or `uv` settings.
+2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps.
 3. Copies your `config.toml` to `~/.snowflake/` if present (skipped if the file doesn't exist).
 4. With `use-oidc: true`, reads a GitHub OIDC token and sets the workload-identity environment variables the CLI expects.
 
