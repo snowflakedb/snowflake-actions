@@ -44,9 +44,14 @@ runs:
         echo "SF_GITHUB_ACTION=true" >> "$GITHUB_ENV"
         echo "SF_CICD_INTEGRATION_VERSION=$SF_CICD_INTEGRATION_VERSION" >> "$GITHUB_ENV"
 
+    # Intentionally no `python-version` here. When set, setup-uv exports
+    # UV_PYTHON into $GITHUB_ENV, which persists into every later step of the
+    # consumer's job. That leaks our internal Python pin (3.11) into their
+    # environment and breaks subsequent `uv` invocations whose project requires
+    # a different interpreter (e.g. requires-python >=3.13). The CLI's Python is
+    # pinned per-install below via `uv tool install --python 3.11` instead, which
+    # scopes the pin to the isolated tool environment without touching the job.
     - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
-      with:
-        python-version: "3.11"
 
     - name: Either cli-version or custom-github-ref allowed
       if: ${{ inputs.cli-version != '' && inputs.custom-github-ref != '' }}
@@ -58,17 +63,17 @@ runs:
     - name: Install snowflake-cli (specific version)
       if: ${{ inputs.cli-version != '' && inputs.cli-version != 'latest' && inputs.custom-github-ref == '' }}
       shell: bash
-      run: uv tool install snowflake-cli==${{ inputs.cli-version }}
+      run: uv tool install --python 3.11 snowflake-cli==${{ inputs.cli-version }}
 
     - name: Install snowflake-cli (custom ref)
       if: ${{ inputs.cli-version == '' && inputs.custom-github-ref != '' }}
       shell: bash
-      run: uv tool install "git+https://github.com/snowflakedb/snowflake-cli.git@${{ inputs.custom-github-ref }}"
+      run: uv tool install --python 3.11 "git+https://github.com/snowflakedb/snowflake-cli.git@${{ inputs.custom-github-ref }}"
 
     - name: Install snowflake-cli (latest release)
       if: ${{ (inputs.cli-version == '' || inputs.cli-version == 'latest') && inputs.custom-github-ref == '' }}
       shell: bash
-      run: uv tool install snowflake-cli
+      run: uv tool install --python 3.11 snowflake-cli
 
     - name: Set up config.toml
       shell: bash

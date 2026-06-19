@@ -41,6 +41,18 @@ jobs:
         uses: ./
         # cli-version omitted → action installs the latest release from PyPI.
 
+      - name: Assert the action did not leak UV_PYTHON
+        shell: bash
+        run: |
+          set -e
+          # The action pins Python per `uv tool install`, so it must not export
+          # UV_PYTHON into the job env (which would break consumers' later `uv`
+          # steps that require a different interpreter).
+          if [ -n "${UV_PYTHON:-}" ]; then
+            echo "::error::UV_PYTHON leaked into the job env: '$UV_PYTHON'"
+            exit 1
+          fi
+
       - name: Smoke-test installed CLI
         shell: bash
         run: |
