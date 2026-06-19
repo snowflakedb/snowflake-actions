@@ -15,7 +15,7 @@ The action:
 
 ```yaml
 steps:
-  - uses: snowflakedb/snowflake-actions@v2
+  - uses: snowflakedb/snowflake-actions@v3
   - run: snow --version
 ```
 
@@ -77,7 +77,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: snowflakedb/snowflake-actions@v2
+      - uses: snowflakedb/snowflake-actions@v3
         with:
           use-oidc: true
       - env:
@@ -91,7 +91,7 @@ Use this only when OIDC isn't available. Store credentials in [GitHub Secrets](h
 
 ```yaml
 steps:
-  - uses: snowflakedb/snowflake-actions@v2
+  - uses: snowflakedb/snowflake-actions@v3
   - env:
       SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
       SNOWFLAKE_ACCOUNT: ${{ secrets.ACCOUNT }}
@@ -112,8 +112,8 @@ See [Configure Snowflake CLI connections](https://docs.snowflake.com/en/develope
 
 ```yaml
 - uses: snowflakedb/snowflake-actions@<sha>   # commit SHA (most secure)
-- uses: snowflakedb/snowflake-actions@v2.0.4  # exact patch
-- uses: snowflakedb/snowflake-actions@v2      # floating major
+- uses: snowflakedb/snowflake-actions@v3.0.0  # exact patch
+- uses: snowflakedb/snowflake-actions@v3      # floating major
 ```
 
 ## Install from a branch, tag, or commit
@@ -121,7 +121,7 @@ See [Configure Snowflake CLI connections](https://docs.snowflake.com/en/develope
 Install the CLI from source (for example, to test an unreleased fix). `v2+`.
 
 ```yaml
-- uses: snowflakedb/snowflake-actions@v2
+- uses: snowflakedb/snowflake-actions@v3
   with:
     custom-github-ref: "feature/my-branch"   # branch, tag, or commit
 ```
