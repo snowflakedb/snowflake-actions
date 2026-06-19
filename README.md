@@ -1,25 +1,42 @@
 # Snowflake Actions
 
-GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt, [DCM](https://docs.snowflake.com/en/developer-guide/snowflake-cli/dcm/overview), [Snowflake App Runtime](https://docs.snowflake.com/en/developer-guide/snowflake-app-runtime/about-snowflake-app-runtime), and Streamlit projects, run SQL, and automate any Snowflake CLI task from CI/CD.
+GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt and Streamlit projects, apply DCM changes, ship Snowflake App Runtime apps, run SQL, and automate any Snowflake CLI task from CI/CD.
 
 ## How it works
 
 The action:
 
-1. Installs Python 3.11 and the `uv` package manager.
-2. Installs the Snowflake CLI in an isolated environment.
-3. Copies your `config.toml` into `~/.snowflake/` if present (skipped with a notice if the file doesn't exist).
-4. With `use-oidc: true`, fetches a GitHub OIDC token and sets the workload-identity environment variables.
+1. Installs `uv`.
+2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps; this does not change the job's Python version or `uv` settings.
+3. Copies your `config.toml` to `~/.snowflake/` if present (skipped if the file doesn't exist).
+4. With `use-oidc: true`, reads a GitHub OIDC token and sets the workload-identity environment variables the CLI expects.
 
-## Quick start
+## Example workflow
+
+Install the Snowflake CLI and run commands against Snowflake from GitHub Actions:
 
 ```yaml
-steps:
-  - uses: snowflakedb/snowflake-actions@v3
-  - run: snow --version
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+        run: snow connection test -x
+      # snow dbt deploy, snow streamlit deploy, snow sql -f migration.sql, etc.
 ```
 
-Connecting to Snowflake also needs auth. See [Authentication](#authentication); **use OIDC.**
+This example uses [OIDC](#oidc-recommended). Configure a Snowflake service user with a matching workload identity before you run it.
 
 ## Inputs
 
