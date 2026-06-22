@@ -1,10 +1,10 @@
 # Snowflake Actions
 
-GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt and Streamlit projects, apply DCM changes, ship Snowflake App Runtime apps, run SQL, and automate any Snowflake CLI task from CI/CD.
+GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt, Streamlit, and DCM projects, ship Snowflake App Runtime apps, run SQL, and automate any Snowflake CLI task from CI/CD.
 
 ## How it works
 
-The action:
+The action installs the Snowflake CLI in your workflow and can configure authentication, so later steps can run `snow` commands against Snowflake.
 
 1. Installs `uv`.
 2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps.
@@ -33,10 +33,11 @@ jobs:
       - env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
         run: snow connection test -x
-      # snow dbt deploy, snow streamlit deploy, snow sql -f migration.sql, etc.
+      # snow dbt deploy, snow streamlit deploy, snow dcm deploy, snow sql -f migration.sql, etc.
 ```
 
-This example uses [OIDC](#oidc-recommended). Configure a Snowflake service user with a matching workload identity before you run it.
+> [!IMPORTANT]
+> This example uses [OIDC](#oidc-recommended). Configure a Snowflake service user with a matching workload identity before you run it.
 
 ## Inputs
 
@@ -102,28 +103,27 @@ jobs:
         run: snow connection test -x
 ```
 
-### Key pair or password (fallback)
+### Credential-based auth (fallback)
 
-Use this only when OIDC isn't available. Store credentials in [GitHub Secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) (first [generate a key pair](https://docs.snowflake.com/en/user-guide/key-pair-auth)) and pass them as `SNOWFLAKE_*` environment variables:
+Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
+
+- Pass credentials as [environment variables](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-environment-variables-for-snowflake-credentials) and use `-x` so the CLI reads them without a `config.toml`.
+- Define a connection in [`config.toml`](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#define-connections).
 
 ```yaml
-steps:
-  - uses: snowflakedb/snowflake-actions@v3
-  - env:
-      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_ACCOUNT: ${{ secrets.ACCOUNT }}
-      SNOWFLAKE_USER: ${{ secrets.USER }}
-      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.PRIVATE_KEY }}
-    run: snow connection test -x
+# Option 1: env vars + temporary connection
+- uses: snowflakedb/snowflake-actions@v3
+- env:
+    SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+    # ...other SNOWFLAKE_* vars — see docs above
+  run: snow connection test -x
+
+# Option 2: config.toml
+- uses: snowflakedb/snowflake-actions@v3
+  with:
+    default-config-file-path: ./config.toml
+- run: snow connection test
 ```
-
-> Set warehouse, database, role, etc. the same way: `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_SCHEMA`.
->
-> If your private key is encrypted, also set `PRIVATE_KEY_PASSPHRASE: ${{ secrets.PASSPHRASE }}`.
->
-> To use a password instead (not recommended), drop `SNOWFLAKE_AUTHENTICATOR` and set `SNOWFLAKE_PASSWORD`.
-
-See [Configure Snowflake CLI connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections) for all options.
 
 ## Version pinning
 
