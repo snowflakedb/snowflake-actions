@@ -154,6 +154,72 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 - **Set `persist-credentials: false`** on `actions/checkout`.
 - **Never commit credentials.** Inject them via GitHub Secrets at runtime.
 
+## Cortex Code CLI action
+
+A companion action that installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. Requires `snowflakedb/snowflake-actions@v3` to run first (provides `snow` CLI and OIDC auth).
+
+```yaml
+- uses: snowflakedb/snowflake-actions@v3
+  with:
+    use-oidc: true
+
+- uses: snowflakedb/snowflake-actions/cortex-code@v3
+```
+
+### How it works
+
+1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
+2. Installs CoCo CLI from the specified channel.
+3. Pins a specific version if `cli-version` is set.
+4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
+
+### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
+| `cli-version` | `latest` | Version to pin (e.g. `1.5.2`). Runs `cortex update <version>` after install. |
+| `connection-name` | `default` | Connection name written to `connections.toml`. |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `cortex-version` | Installed CoCo CLI version string. |
+
+### Example: CoCo agent workflow
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - uses: snowflakedb/snowflake-actions/cortex-code@v3
+        with:
+          cli-channel: beta
+
+      - run: cortex exec --file .cortex/prompts/scan.md -c default --bypass --no-history
+```
+
+### Platform support
+
+The Cortex Code CLI action supports Linux and macOS runners. Windows support is planned.
+
 ## Support
 
 Report issues or request features via [GitHub Issues](https://github.com/snowflakedb/snowflake-actions/issues).

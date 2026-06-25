@@ -1,0 +1,106 @@
+name: Test — Cortex Code action
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+        paths: ["cortex-code/**"]
+    workflow_dispatch:
+
+permissions:
+    id-token: write
+    contents: read
+
+jobs:
+    install-cortex-code:
+        name: Install CoCo CLI (stable)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
+
+            - name: Install Snowflake CLI
+              uses: ./
+
+            - name: Install Cortex Code CLI (stable, latest)
+              uses: ./cortex-code
+
+            - name: Verify cortex is on PATH
+              shell: bash
+              run: |
+                  set -e
+                  which cortex
+                  cortex --version
+
+            - name: Verify install location
+              shell: bash
+              run: |
+                  set -e
+                  test -x "${HOME}/.local/bin/cortex"
+
+    install-beta-channel:
+        name: Install CoCo CLI (beta) on ubuntu-latest
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  persist-credentials: false
+
+            - name: Install Snowflake CLI
+              uses: ./
+
+            - name: Install Cortex Code CLI (beta channel)
+              uses: ./cortex-code
+              with:
+                  cli-channel: beta
+
+            - name: Verify cortex is on PATH
+              shell: bash
+              run: |
+                  set -e
+                  which cortex
+                  cortex --version
+
+    # TODO: Enable once a service user with OIDC workload identity is provisioned
+    #       for this repo and OIDC_TEST_ENABLED variable is set to 'true'.
+    #
+    # test-oidc-connection:
+    #   name: Test OIDC connection
+    #   runs-on: ubuntu-latest
+    #   if: ${{ vars.OIDC_TEST_ENABLED == 'true' }}
+    #   env:
+    #     SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+    #     SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+    #     SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+    #     SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+    #   steps:
+    #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    #       with:
+    #         persist-credentials: false
+    #
+    #     - uses: ./
+    #       with:
+    #         use-oidc: true
+    #
+    #     - uses: ./cortex-code
+    #
+    #     - name: Verify connections.toml was auto-configured
+    #       shell: bash
+    #       run: |
+    #         set -e
+    #         test -f "${HOME}/.snowflake/connections.toml"
+    #         grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
+    #         echo "connections.toml contents (redacted):"
+    #         sed 's/token.*/token = "***REDACTED***"/' "${HOME}/.snowflake/connections.toml"
+    #
+    #     - name: Verify connection works
+    #       shell: bash
+    #       run: snow connection test -c default
+    #
+    #     - name: Verify cortex can reach Snowflake
+    #       shell: bash
+    #       run: |
+    #         cortex exec -c default --format json --max-turns 2 --bypass \
+    #           "Run this SQL: SELECT CURRENT_USER() AS user, CURRENT_ROLE() AS role" \
+    #           || echo "::warning::cortex exec failed (may need CORTEX_USER role)"
