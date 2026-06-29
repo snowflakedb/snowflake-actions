@@ -178,8 +178,9 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
-| `cli-version` | `latest` | Version to pin (e.g. `1.5.2`). Runs `cortex update <version>` after install. |
+| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
 
 ### Outputs
 
@@ -218,7 +219,17 @@ jobs:
 
 ### Platform support
 
-The Cortex Code CLI action supports Linux and macOS runners. Windows support is planned.
+Runs on Linux (ubuntu) GitHub-hosted runners. Requires Python 3.11+ on PATH (satisfied by all GitHub-hosted runners).
+
+### Self-hosted runners
+
+On self-hosted runners that persist between jobs, add a cleanup step to remove credentials:
+
+```yaml
+- name: Clean up credentials
+  if: always()
+  run: rm -f ~/.snowflake/connections.toml
+```
 
 ## Support
 
