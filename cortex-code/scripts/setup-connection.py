@@ -3,13 +3,15 @@
 
 Detection logic:
 1. If connection already exists in connections.toml -> skip (no overwrite).
-2. If SNOWFLAKE_TOKEN is set in env (parent action configured OIDC) -> write connection using env vars.
-3. If neither token nor existing connection -> fail with helpful message.
+2. If OIDC token is set in env (parent action configured OIDC) -> write connection using env vars.
+3. If neither token nor existing connection -> skip gracefully (install-only mode).
 
 Requires Python 3.11+ (tomllib in stdlib).
 """
 
+import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,12 +31,21 @@ def env_optional(name: str) -> str:
 
 
 def write_toml_value(f, key: str, value: str) -> None:
-    f.write(f'{key:<27}= "{value}"\n')
+    # json.dumps gives correct TOML basic string quoting (handles " and \ safely)
+    f.write(f"{key:<27}= {json.dumps(value)}\n")
 
 
 def main() -> None:
     conn_name = os.environ.get("CONNECTION_NAME", "default")
+    token_var = os.environ.get("OIDC_TOKEN_NAME", "SNOWFLAKE_TOKEN")
     conn_file = Path.home() / ".snowflake" / "connections.toml"
+
+    # Validate connection name (prevent TOML injection)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", conn_name):
+        error(
+            f"Invalid connection name '{conn_name}'. "
+            "Only alphanumeric characters, hyphens, and underscores are allowed."
+        )
 
     # Check if connection already exists
     if conn_file.exists():
@@ -43,21 +54,21 @@ def main() -> None:
             print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
             return
 
-    # Auto-detect: look for SNOWFLAKE_TOKEN from parent action
-    token = env_optional("SNOWFLAKE_TOKEN")
+    # Auto-detect: look for OIDC token from parent action
+    token = env_optional(token_var)
     if not token:
         # No token -- check if file has ANY connection already
         if conn_file.exists():
             existing = tomllib.loads(conn_file.read_text())
             if existing:
                 print(
-                    f"No SNOWFLAKE_TOKEN found, but {conn_file} has existing connections. "
+                    f"No {token_var} found, but {conn_file} has existing connections. "
                     f"Cortex CLI can use: cortex -c <name>"
                 )
                 return
         # No token, no file -- not an error, just skip (install-only mode)
         print(
-            "No SNOWFLAKE_TOKEN in environment and no connections.toml found. "
+            f"No {token_var} in environment and no connections.toml found. "
             "Skipping connection setup. To enable, run snowflakedb/snowflake-actions@v3 "
             "with use-oidc: true before this action."
         )
@@ -68,7 +79,7 @@ def main() -> None:
     user = env_optional("SNOWFLAKE_USER")
     if not account or not user:
         error(
-            "SNOWFLAKE_TOKEN is set but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
+            f"{token_var} is set but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
             "Set these as env vars in your workflow."
         )
 
