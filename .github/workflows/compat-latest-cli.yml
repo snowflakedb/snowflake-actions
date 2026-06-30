@@ -60,3 +60,22 @@ jobs:
           snow --version
           snow --help > /dev/null
           snow connection list > /dev/null
+
+  install-cli-leaf:
+    name: Install Snowflake CLI via the snowflake-cli leaf action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Snowflake CLI via the leaf action
+        uses: ./snowflake-cli
+
+      - name: Smoke-test installed CLI
+        shell: bash
+        run: |
+          set -e
+          snow --version
+          snow --help > /dev/null
+          snow connection list > /dev/null

@@ -69,8 +69,8 @@ def main() -> None:
         # No token, no file -- not an error, just skip (install-only mode)
         print(
             f"No {token_var} in environment and no connections.toml found. "
-            "Skipping connection setup. To enable, run snowflakedb/snowflake-actions@v3 "
-            "with use-oidc: true before this action."
+            "Skipping connection setup. To enable, set use-oidc: true on this action "
+            "(or run snowflakedb/snowflake-actions@v3 with use-oidc: true before it)."
         )
         return
 

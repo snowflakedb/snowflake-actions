@@ -1,0 +1,78 @@
+# snowflake-cli/action.yml
+#
+# Installs only the Snowflake CLI (snow). This is the leaf form of the root
+# action's Snowflake CLI path — use it when you want to be explicit about
+# installing just the CLI:
+#
+#   uses: snowflakedb/snowflake-actions/snowflake-cli@v3
+#
+# The root action (snowflakedb/snowflake-actions@v3) installs the Snowflake CLI
+# by default and can additionally install the Cortex Code CLI; this leaf exists
+# for callers who want an unambiguous, CLI-only entry point.
+name: "Snowflake CLI"
+description: "Install and configure the Snowflake CLI (snow) for CI/CD workflows."
+branding:
+  icon: "terminal"
+  color: "blue"
+
+inputs:
+  cli-version:
+    description: "Snowflake CLI version (by default, installs the latest version)"
+    required: false
+
+  default-config-file-path:
+    description: "Path to the default config file"
+    required: false
+    default: "./config.toml"
+
+  custom-github-ref:
+    description: "GitHub branch, tag, or commit to install from (if set, installs from GitHub; otherwise, installs from PyPI)"
+    required: false
+
+  use-oidc:
+    description: "Enable OIDC authentication"
+    required: false
+    default: "false"
+
+  oidc-token-name:
+    description: >-
+      "Name of the token environment variable for OIDC authentication."
+      " By default it's set for [temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection), "
+      "however it can be changed to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections."
+    required: false
+    default: "SNOWFLAKE_TOKEN"
+
+runs:
+  using: "composite"
+  steps:
+    - name: add extra telemetry data
+      shell: bash
+      env:
+        # Bump on each release to match the repository tag
+        SF_CICD_INTEGRATION_VERSION: "v3.0.0"
+      run: |
+        echo "SF_GITHUB_ACTION=true" >> "$GITHUB_ENV"
+        echo "SF_CICD_INTEGRATION_VERSION=$SF_CICD_INTEGRATION_VERSION" >> "$GITHUB_ENV"
+
+    # See the root action.yml for why `python-version` is intentionally omitted.
+    - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
+
+    - name: Install Snowflake CLI
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        CUSTOM_GITHUB_REF: ${{ inputs.custom-github-ref }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/install-snowflake-cli.sh
+
+    - name: Set up config.toml
+      shell: bash
+      run: bash $GITHUB_ACTION_PATH/../scripts/setup-config-file.sh
+      env:
+        CONFIG_FILE_PATH: ${{ inputs.default-config-file-path }}
+
+    - name: Set up workload identity authentication
+      if: ${{ inputs.use-oidc == 'true' }}
+      shell: bash
+      env:
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/configure-snowflake-oidc.sh

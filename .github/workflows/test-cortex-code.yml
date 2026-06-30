@@ -2,10 +2,17 @@ name: Test — Cortex Code action
 
 on:
   pull_request:
-    paths: ["cortex-code/**", ".github/workflows/test-cortex-code.yml"]
+    paths:
+      - "cortex-code/**"
+      - "scripts/**"
+      - "action.yml"
+      - ".github/workflows/test-cortex-code.yml"
   push:
     branches: [main]
-    paths: ["cortex-code/**"]
+    paths:
+      - "cortex-code/**"
+      - "scripts/**"
+      - "action.yml"
   workflow_dispatch:
 
 permissions:
@@ -62,6 +69,78 @@ jobs:
           set -e
           which cortex
           cortex --version
+
+  install-cortex-standalone:
+    name: Install CoCo CLI standalone (no snow)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Cortex Code CLI without the Snowflake CLI
+        uses: ./cortex-code
+
+      - name: Verify cortex is on PATH and snow is NOT installed
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+          if command -v snow &>/dev/null; then
+            echo "::error::snow should not be installed in the standalone cortex-code job"
+            exit 1
+          fi
+          echo "PASS: cortex installed standalone, snow absent"
+
+  install-both-from-root:
+    name: Install snow + CoCo from root action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install both CLIs from the root action
+        uses: ./
+        with:
+          cortex-code: true
+
+      - name: Verify both snow and cortex are on PATH
+        shell: bash
+        run: |
+          set -e
+          which snow
+          snow --version
+          which cortex
+          cortex --version
+          echo "PASS: snow + cortex both installed from root"
+
+  install-cortex-only-from-root:
+    name: Install only CoCo from root action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install only Cortex Code via the root action
+        uses: ./
+        with:
+          snowflake-cli: false
+          cortex-code: true
+
+      - name: Verify cortex present, snow absent
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+          if command -v snow &>/dev/null; then
+            echo "::error::snow should not be installed when snowflake-cli: false"
+            exit 1
+          fi
+          echo "PASS: only cortex installed from root"
 
   unit-test-setup-connection:
     name: Unit test setup-connection.py

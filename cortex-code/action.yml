@@ -1,6 +1,6 @@
-# action.yml
+# cortex-code/action.yml
 name: "Cortex Code CLI"
-description: "Install and configure the Cortex Code CLI (cortex) for CI/CD workflows. Requires snowflakedb/snowflake-actions@v3 to run first."
+description: "Install and configure the Cortex Code CLI (cortex) for CI/CD workflows."
 branding:
   icon: "cpu"
   color: "blue"
@@ -17,12 +17,17 @@ inputs:
     default: "latest"
 
   connection-name:
-    description: "Connection name to write in connections.toml when auto-configuring from OIDC env vars"
+    description: "Connection name to write in connections.toml when configuring from OIDC env vars"
     required: false
     default: "default"
 
+  use-oidc:
+    description: "Mint a GitHub OIDC token and write a workload-identity connection. Requires 'id-token: write'. Leave false if a parent step already set the OIDC token env var."
+    required: false
+    default: "false"
+
   oidc-token-name:
-    description: "Env var name containing the OIDC token. Must match the parent action's oidc-token-name if overridden."
+    description: "Env var name containing the OIDC token. Must match the token env var set by use-oidc (or by a parent action, if it set one)."
     required: false
     default: "SNOWFLAKE_TOKEN"
 
@@ -34,14 +39,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Verify snow CLI is available
-      shell: bash
-      run: |
-        if ! command -v snow &>/dev/null; then
-          echo "::error::snow CLI not found. You must run snowflakedb/snowflake-actions@v3 before this action."
-          exit 1
-        fi
-
     - name: Validate inputs
       shell: bash
       run: |
@@ -73,6 +70,16 @@ runs:
       run: |
         export PATH="${HOME}/.local/bin:$PATH"
         cortex update ${{ inputs.cli-version }}
+
+    # Mint the OIDC token without the Snowflake CLI, so this action stands alone.
+    # If a parent step already exported the token, this is a no-op (see the
+    # script's idempotency check).
+    - name: Set up workload identity authentication
+      if: ${{ inputs.use-oidc == 'true' }}
+      shell: bash
+      env:
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/oidc-token.sh
 
     - name: Configure connection
       shell: bash
