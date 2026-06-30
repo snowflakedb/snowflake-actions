@@ -154,6 +154,83 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 - **Set `persist-credentials: false`** on `actions/checkout`.
 - **Never commit credentials.** Inject them via GitHub Secrets at runtime.
 
+## Cortex Code CLI action
+
+A companion action that installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. Requires `snowflakedb/snowflake-actions@v3` to run first (provides `snow` CLI and OIDC auth).
+
+```yaml
+- uses: snowflakedb/snowflake-actions@v3
+  with:
+    use-oidc: true
+
+- uses: snowflakedb/snowflake-actions/cortex-code@v3
+```
+
+### How it works
+
+1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
+2. Installs CoCo CLI from the specified channel.
+3. Pins a specific version if `cli-version` is set.
+4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
+
+### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
+| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. |
+| `connection-name` | `default` | Connection name written to `connections.toml`. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `cortex-version` | Installed CoCo CLI version string. |
+
+### Example: CoCo agent workflow
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - uses: snowflakedb/snowflake-actions/cortex-code@v3
+        with:
+          cli-channel: beta
+
+      - run: cortex exec --file .cortex/prompts/scan.md -c default --bypass --no-history
+```
+
+### Platform support
+
+Runs on Linux (ubuntu) GitHub-hosted runners. Requires Python 3.11+ on PATH (satisfied by all GitHub-hosted runners).
+
+### Self-hosted runners
+
+On self-hosted runners that persist between jobs, add a cleanup step to remove credentials:
+
+```yaml
+- name: Clean up credentials
+  if: always()
+  run: rm -f ~/.snowflake/connections.toml
+```
+
 ## Support
 
 Report issues or request features via [GitHub Issues](https://github.com/snowflakedb/snowflake-actions/issues).

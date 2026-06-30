@@ -1,0 +1,91 @@
+# action.yml
+name: "Cortex Code CLI"
+description: "Install and configure the Cortex Code CLI (cortex) for CI/CD workflows. Requires snowflakedb/snowflake-actions@v3 to run first."
+branding:
+  icon: "cpu"
+  color: "blue"
+
+inputs:
+  cli-channel:
+    description: "Install channel: stable or beta"
+    required: false
+    default: "stable"
+
+  cli-version:
+    description: "CoCo CLI version to install (e.g. 1.5.2). Use 'latest' for the newest in the channel. Version pinning requires the version to be available."
+    required: false
+    default: "latest"
+
+  connection-name:
+    description: "Connection name to write in connections.toml when auto-configuring from OIDC env vars"
+    required: false
+    default: "default"
+
+  oidc-token-name:
+    description: "Env var name containing the OIDC token. Must match the parent action's oidc-token-name if overridden."
+    required: false
+    default: "SNOWFLAKE_TOKEN"
+
+outputs:
+  cortex-version:
+    description: "Installed Cortex Code CLI version"
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Verify snow CLI is available
+      shell: bash
+      run: |
+        if ! command -v snow &>/dev/null; then
+          echo "::error::snow CLI not found. You must run snowflakedb/snowflake-actions@v3 before this action."
+          exit 1
+        fi
+
+    - name: Validate inputs
+      shell: bash
+      run: |
+        CHANNEL="${{ inputs.cli-channel }}"
+        if [[ "$CHANNEL" != "stable" && "$CHANNEL" != "beta" ]]; then
+          echo "::error::cli-channel must be 'stable' or 'beta', got '${CHANNEL}'"
+          exit 1
+        fi
+        VERSION="${{ inputs.cli-version }}"
+        if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::cli-version must be 'latest' or a semver (e.g. 1.5.2), got '${VERSION}'"
+          exit 1
+        fi
+
+    - name: Add telemetry data
+      shell: bash
+      run: |
+        echo "SF_CORTEX_CODE_GITHUB_ACTION=true" >> "$GITHUB_ENV"
+
+    - name: Install Cortex Code CLI
+      shell: bash
+      env:
+        CORTEX_CHANNEL: ${{ inputs.cli-channel }}
+      run: bash $GITHUB_ACTION_PATH/scripts/install-cortex.sh
+
+    - name: Pin specific version
+      if: ${{ inputs.cli-version != 'latest' }}
+      shell: bash
+      run: |
+        export PATH="${HOME}/.local/bin:$PATH"
+        cortex update ${{ inputs.cli-version }}
+
+    - name: Configure connection
+      shell: bash
+      env:
+        CONNECTION_NAME: ${{ inputs.connection-name }}
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: python3 $GITHUB_ACTION_PATH/scripts/setup-connection.py
+
+    - name: Output version
+      id: version
+      shell: bash
+      run: |
+        export PATH="${HOME}/.local/bin:$PATH"
+        VERSION=$(cortex --version 2>&1 | head -1)
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Cortex Code CLI: ${VERSION}"

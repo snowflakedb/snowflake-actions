@@ -1,0 +1,212 @@
+name: Test — Cortex Code action
+
+on:
+  pull_request:
+    paths: ["cortex-code/**", ".github/workflows/test-cortex-code.yml"]
+  push:
+    branches: [main]
+    paths: ["cortex-code/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  install-cortex-code:
+    name: Install CoCo CLI (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Snowflake CLI
+        uses: ./
+
+      - name: Install Cortex Code CLI (stable, latest)
+        uses: ./cortex-code
+
+      - name: Verify cortex is on PATH
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+
+      - name: Verify install location
+        shell: bash
+        run: |
+          set -e
+          test -x "${HOME}/.local/bin/cortex"
+
+  install-beta-channel:
+    name: Install CoCo CLI (beta)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Snowflake CLI
+        uses: ./
+
+      - name: Install Cortex Code CLI (beta channel)
+        uses: ./cortex-code
+        with:
+          cli-channel: beta
+
+      - name: Verify cortex is on PATH
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+
+  unit-test-setup-connection:
+    name: Unit test setup-connection.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: skip when no token and no file"
+        shell: bash
+        run: |
+          set -e
+          export HOME=$(mktemp -d)
+          unset SNOWFLAKE_TOKEN
+          OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "Skipping connection setup"
+          test ! -f "${HOME}/.snowflake/connections.toml"
+          echo "PASS: skip path"
+
+      - name: "Test: write connection when token is set"
+        shell: bash
+        run: |
+          set -e
+          export HOME=$(mktemp -d)
+          export SNOWFLAKE_TOKEN="test-token-123"
+          export SNOWFLAKE_ACCOUNT="test-account"
+          export SNOWFLAKE_USER="test-user"
+          export SNOWFLAKE_WAREHOUSE="test-wh"
+          export SNOWFLAKE_ROLE="test-role"
+          export CONNECTION_NAME="default"
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export GITHUB_ENV=$(mktemp)
+          python3 cortex-code/scripts/setup-connection.py
+          # Verify file exists and has correct content
+          test -f "${HOME}/.snowflake/connections.toml"
+          grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
+          grep -q '"test-account"' "${HOME}/.snowflake/connections.toml"
+          grep -q '"test-user"' "${HOME}/.snowflake/connections.toml"
+          grep -q '"test-token-123"' "${HOME}/.snowflake/connections.toml"
+          grep -q '"test-wh"' "${HOME}/.snowflake/connections.toml"
+          grep -q '"test-role"' "${HOME}/.snowflake/connections.toml"
+          # Verify permissions
+          PERMS=$(stat -c '%a' "${HOME}/.snowflake/connections.toml")
+          test "$PERMS" = "600"
+          echo "PASS: write path"
+
+      - name: "Test: append new connection to existing file"
+        shell: bash
+        run: |
+          set -e
+          export HOME=$(mktemp -d)
+          mkdir -p "${HOME}/.snowflake"
+          printf '[existing]\naccount = "old-account"\n' > "${HOME}/.snowflake/connections.toml"
+          export SNOWFLAKE_TOKEN="new-token"
+          export SNOWFLAKE_ACCOUNT="new-account"
+          export SNOWFLAKE_USER="new-user"
+          export CONNECTION_NAME="second"
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export GITHUB_ENV=$(mktemp)
+          python3 cortex-code/scripts/setup-connection.py
+          # Both connections should exist
+          grep -q '\[existing\]' "${HOME}/.snowflake/connections.toml"
+          grep -q '\[second\]' "${HOME}/.snowflake/connections.toml"
+          grep -q '"new-account"' "${HOME}/.snowflake/connections.toml"
+          echo "PASS: append path"
+
+      - name: "Test: skip when connection name already exists"
+        shell: bash
+        run: |
+          set -e
+          export HOME=$(mktemp -d)
+          mkdir -p "${HOME}/.snowflake"
+          printf '[default]\naccount = "existing-account"\n' > "${HOME}/.snowflake/connections.toml"
+          export SNOWFLAKE_TOKEN="should-not-be-written"
+          export SNOWFLAKE_ACCOUNT="should-not-be-written"
+          export SNOWFLAKE_USER="should-not-be-written"
+          export CONNECTION_NAME="default"
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export GITHUB_ENV=$(mktemp)
+          OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "already exists"
+          # Original content unchanged
+          grep -q '"existing-account"' "${HOME}/.snowflake/connections.toml"
+          ! grep -q '"should-not-be-written"' "${HOME}/.snowflake/connections.toml"
+          echo "PASS: no-overwrite path"
+
+      - name: "Test: reject invalid connection name"
+        shell: bash
+        run: |
+          set -e
+          export HOME=$(mktemp -d)
+          export SNOWFLAKE_TOKEN="token"
+          export SNOWFLAKE_ACCOUNT="acct"
+          export SNOWFLAKE_USER="user"
+          export CONNECTION_NAME='evil]\ninjection = "pwned'
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export GITHUB_ENV=$(mktemp)
+          if python3 cortex-code/scripts/setup-connection.py 2>&1; then
+            echo "FAIL: should have rejected invalid connection name"
+            exit 1
+          fi
+          echo "PASS: validation rejected bad name"
+
+  # TODO: Enable once a service user with OIDC workload identity is provisioned
+  #       for this repo and OIDC_TEST_ENABLED variable is set to 'true'.
+  #
+  # test-oidc-connection:
+  #   name: Test OIDC connection
+  #   runs-on: ubuntu-latest
+  #   if: ${{ vars.OIDC_TEST_ENABLED == 'true' }}
+  #   env:
+  #     SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  #     SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  #     SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+  #     SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+  #   steps:
+  #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+  #       with:
+  #         persist-credentials: false
+  #
+  #     - uses: ./
+  #       with:
+  #         use-oidc: true
+  #
+  #     - uses: ./cortex-code
+  #
+  #     - name: Verify connections.toml was auto-configured
+  #       shell: bash
+  #       run: |
+  #         set -e
+  #         test -f "${HOME}/.snowflake/connections.toml"
+  #         grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
+  #         echo "connections.toml contents (redacted):"
+  #         sed 's/token.*/token = "***REDACTED***"/' "${HOME}/.snowflake/connections.toml"
+  #
+  #     - name: Verify connection works
+  #       shell: bash
+  #       run: snow connection test -c default
+  #
+  #     - name: Verify cortex can reach Snowflake
+  #       shell: bash
+  #       run: |
+  #         cortex exec -c default --format json --max-turns 2 --bypass \
+  #           "Run this SQL: SELECT CURRENT_USER() AS user, CURRENT_ROLE() AS role" \
+  #           || echo "::warning::cortex exec failed (may need CORTEX_USER role)"
