@@ -88,5 +88,7 @@ runs:
         echo "SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY" >> "$GITHUB_ENV"
         echo "SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=OIDC" >> "$GITHUB_ENV"
         echo "SNOWFLAKE_AUDIENCE=snowflakecomputing.com" >> "$GITHUB_ENV"
+        # Telemetry: tell the CLI which auth type this action configured.
+        echo "SF_CICD_AUTH_TYPE=oidc" >> "$GITHUB_ENV"
         TOKEN_NAME_UPPER=$(echo ${{ inputs.oidc-token-name }} | tr '[:lower:]' '[:upper:]')
         echo "${TOKEN_NAME_UPPER}=$(snow auth oidc read-token --type=github)" >> "$GITHUB_ENV"
