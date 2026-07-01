@@ -14,11 +14,13 @@
 
 set -euo pipefail
 
-echo "SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY" >> "$GITHUB_ENV"
-echo "SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=OIDC" >> "$GITHUB_ENV"
-echo "SNOWFLAKE_AUDIENCE=snowflakecomputing.com" >> "$GITHUB_ENV"
-# Telemetry: tell the CLI which auth type this action configured.
-echo "SF_CICD_AUTH_TYPE=oidc" >> "$GITHUB_ENV"
-
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
-echo "${TOKEN_NAME_UPPER}=$(snow auth oidc read-token --type=github)" >> "$GITHUB_ENV"
+
+{
+    echo "SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY"
+    echo "SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=OIDC"
+    echo "SNOWFLAKE_AUDIENCE=snowflakecomputing.com"
+    # Tell the CLI which auth type this action configured.
+    echo "SF_CICD_AUTH_TYPE=oidc"
+    echo "${TOKEN_NAME_UPPER}=$(snow auth oidc read-token --type=github)"
+} >> "$GITHUB_ENV"

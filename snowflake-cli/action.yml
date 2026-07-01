@@ -36,23 +36,19 @@ inputs:
 
   oidc-token-name:
     description: >-
-      "Name of the token environment variable for OIDC authentication."
-      " By default it's set for [temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection), "
-      "however it can be changed to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections."
+      Name of the token environment variable for OIDC authentication. By default it is set for
+      temporary connections
+      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
+      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
     required: false
     default: "SNOWFLAKE_TOKEN"
 
 runs:
   using: "composite"
   steps:
-    - name: add extra telemetry data
+    - name: Set up action environment
       shell: bash
-      env:
-        # Bump on each release to match the repository tag
-        SF_CICD_INTEGRATION_VERSION: "v3.0.0"
-      run: |
-        echo "SF_GITHUB_ACTION=true" >> "$GITHUB_ENV"
-        echo "SF_CICD_INTEGRATION_VERSION=$SF_CICD_INTEGRATION_VERSION" >> "$GITHUB_ENV"
+      run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh
 
     # See the root action.yml for why `python-version` is intentionally omitted.
     - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6

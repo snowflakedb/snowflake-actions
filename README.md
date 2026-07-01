@@ -73,6 +73,7 @@ jobs:
 - `custom-github-ref` installs the Snowflake CLI from [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI, and requires action `v2+`.
 - `default-config-file-path` is skipped if the file is absent.
 - `cortex-*` and `connection-name` apply only when `cortex-code: true`.
+- `cortex-code: true` is supported on Linux runners only (the Cortex Code CLI is Linux-only), even though the Snowflake CLI itself runs on Linux, macOS, and Windows.
 
 ## Authentication
 
@@ -176,6 +177,9 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 
 ## Cortex Code CLI
 
+> [!NOTE]
+> The Cortex Code CLI action is in **public preview**. Its inputs and behavior may change before general availability.
+
 Installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. It configures OIDC on its own and does **not** require the Snowflake CLI to be installed first.
 
 There are three ways to get it:
@@ -212,6 +216,9 @@ permissions:
     use-oidc: true
 
 - uses: snowflakedb/snowflake-actions/cortex-code@v3
+  env:
+    SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+    SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
 ```
 
 ### How it works

@@ -96,7 +96,6 @@ def main() -> None:
         write_toml_value(f, "user", user)
         write_toml_value(f, "authenticator", "WORKLOAD_IDENTITY")
         write_toml_value(f, "workload_identity_provider", "OIDC")
-        write_toml_value(f, "token", token)
 
         warehouse = env_optional("SNOWFLAKE_WAREHOUSE")
         if warehouse:

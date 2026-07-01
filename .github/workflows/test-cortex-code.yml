@@ -154,7 +154,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           unset SNOWFLAKE_TOKEN
           OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
           echo "$OUTPUT"
@@ -166,7 +167,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           export SNOWFLAKE_TOKEN="test-token-123"
           export SNOWFLAKE_ACCOUNT="test-account"
           export SNOWFLAKE_USER="test-user"
@@ -174,7 +176,8 @@ jobs:
           export SNOWFLAKE_ROLE="test-role"
           export CONNECTION_NAME="default"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           python3 cortex-code/scripts/setup-connection.py
           # Verify file exists and has correct content
           test -f "${HOME}/.snowflake/connections.toml"
@@ -193,7 +196,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           mkdir -p "${HOME}/.snowflake"
           printf '[existing]\naccount = "old-account"\n' > "${HOME}/.snowflake/connections.toml"
           export SNOWFLAKE_TOKEN="new-token"
@@ -201,7 +205,8 @@ jobs:
           export SNOWFLAKE_USER="new-user"
           export CONNECTION_NAME="second"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           python3 cortex-code/scripts/setup-connection.py
           # Both connections should exist
           grep -q '\[existing\]' "${HOME}/.snowflake/connections.toml"
@@ -213,7 +218,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           mkdir -p "${HOME}/.snowflake"
           printf '[default]\naccount = "existing-account"\n' > "${HOME}/.snowflake/connections.toml"
           export SNOWFLAKE_TOKEN="should-not-be-written"
@@ -221,31 +227,78 @@ jobs:
           export SNOWFLAKE_USER="should-not-be-written"
           export CONNECTION_NAME="default"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "already exists"
           # Original content unchanged
           grep -q '"existing-account"' "${HOME}/.snowflake/connections.toml"
-          ! grep -q '"should-not-be-written"' "${HOME}/.snowflake/connections.toml"
+          if grep -q '"should-not-be-written"' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: existing connection was overwritten"
+            exit 1
+          fi
           echo "PASS: no-overwrite path"
 
       - name: "Test: reject invalid connection name"
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           export SNOWFLAKE_TOKEN="token"
           export SNOWFLAKE_ACCOUNT="acct"
           export SNOWFLAKE_USER="user"
           export CONNECTION_NAME='evil]\ninjection = "pwned'
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           if python3 cortex-code/scripts/setup-connection.py 2>&1; then
             echo "FAIL: should have rejected invalid connection name"
             exit 1
           fi
           echo "PASS: validation rejected bad name"
+
+  unit-test-oidc-token:
+    name: Unit test oidc-token.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: reuse a token already in the environment"
+        shell: bash
+        run: |
+          set -e
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export SNOWFLAKE_TOKEN="already-minted-token"
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
+          OUTPUT=$(bash scripts/oidc-token.sh 2>&1)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "reusing it"
+          # Reuse must not append anything to the environment file.
+          test ! -s "$GITHUB_ENV"
+          echo "PASS: reuse path"
+
+      - name: "Test: error when the id-token endpoint is unavailable"
+        shell: bash
+        run: |
+          set -e
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          unset SNOWFLAKE_TOKEN
+          unset ACTIONS_ID_TOKEN_REQUEST_URL
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
+          if OUTPUT=$(bash scripts/oidc-token.sh 2>&1); then
+            echo "FAIL: should have errored without the id-token endpoint"
+            exit 1
+          fi
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "id-token: write"
+          echo "PASS: missing-endpoint path"
 
   # TODO: Enable once a service user with OIDC workload identity is provisioned
   #       for this repo and OIDC_TEST_ENABLED variable is set to 'true'.
