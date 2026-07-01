@@ -42,17 +42,9 @@ runs:
     - name: Validate inputs
       shell: bash
       env:
-        CLI_CHANNEL: ${{ inputs.cli-channel }}
-        CLI_VERSION: ${{ inputs.cli-version }}
-      run: |
-        if [[ "$CLI_CHANNEL" != "stable" && "$CLI_CHANNEL" != "beta" ]]; then
-          echo "::error::cli-channel must be 'stable' or 'beta', got '${CLI_CHANNEL}'"
-          exit 1
-        fi
-        if [[ "$CLI_VERSION" != "latest" && ! "$CLI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::cli-version must be 'latest' or a semver (e.g. 1.5.2), got '${CLI_VERSION}'"
-          exit 1
-        fi
+        CHANNEL: ${{ inputs.cli-channel }}
+        VERSION: ${{ inputs.cli-version }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/validate-cortex-inputs.sh
 
     - name: Set up action environment
       shell: bash

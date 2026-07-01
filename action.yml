@@ -121,17 +121,11 @@ runs:
       if: ${{ inputs.cortex-code == 'true' }}
       shell: bash
       env:
-        CORTEX_CHANNEL: ${{ inputs.cortex-channel }}
-        CORTEX_VERSION: ${{ inputs.cortex-version }}
-      run: |
-        if [[ "$CORTEX_CHANNEL" != "stable" && "$CORTEX_CHANNEL" != "beta" ]]; then
-          echo "::error::cortex-channel must be 'stable' or 'beta', got '${CORTEX_CHANNEL}'"
-          exit 1
-        fi
-        if [[ "$CORTEX_VERSION" != "latest" && ! "$CORTEX_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::cortex-version must be 'latest' or a semver (e.g. 1.5.2), got '${CORTEX_VERSION}'"
-          exit 1
-        fi
+        CHANNEL: ${{ inputs.cortex-channel }}
+        VERSION: ${{ inputs.cortex-version }}
+        CHANNEL_INPUT_NAME: cortex-channel
+        VERSION_INPUT_NAME: cortex-version
+      run: bash $GITHUB_ACTION_PATH/scripts/validate-cortex-inputs.sh
 
     - name: Install Cortex Code CLI
       if: ${{ inputs.cortex-code == 'true' }}
