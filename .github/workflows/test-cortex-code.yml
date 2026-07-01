@@ -184,9 +184,14 @@ jobs:
           grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-account"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-user"' "${HOME}/.snowflake/connections.toml"
-          grep -q '"test-token-123"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-wh"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-role"' "${HOME}/.snowflake/connections.toml"
+          # The token is NOT persisted to the file; it is read from the
+          # SNOWFLAKE_TOKEN env var at runtime.
+          if grep -q '"test-token-123"' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: token must not be written to connections.toml"
+            exit 1
+          fi
           # Verify permissions
           PERMS=$(stat -c '%a' "${HOME}/.snowflake/connections.toml")
           test "$PERMS" = "600"

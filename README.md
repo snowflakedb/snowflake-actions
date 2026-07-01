@@ -226,7 +226,7 @@ permissions:
 1. Installs the Cortex Code CLI from the specified channel.
 2. Pins a specific version if `cli-version` is set.
 3. With `use-oidc: true`, mints a GitHub OIDC token (no Snowflake CLI needed). If a prior step already exported the token, it's reused.
-4. Writes `connections.toml` from the token so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
+4. Writes `connections.toml` (account, user, and workload-identity settings) so `cortex -c <name>` resolves. The OIDC token itself is read from the `SNOWFLAKE_TOKEN` environment variable at run time, not persisted to the file. If a connection with that name already exists, it skips (no overwrite).
 
 ### Inputs
 
