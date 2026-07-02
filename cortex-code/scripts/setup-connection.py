@@ -14,6 +14,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 try:
     import tomllib
@@ -21,7 +22,7 @@ except ModuleNotFoundError:
     sys.exit("::error::Python 3.11+ required (tomllib not available).")
 
 
-def error(msg: str) -> None:
+def error(msg: str) -> NoReturn:
     print(f"::error::{msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -47,30 +48,35 @@ def main() -> None:
             "Only alphanumeric characters, hyphens, and underscores are allowed."
         )
 
-    # Check if connection already exists
+    # Read existing connections once (empty dict if the file is absent).
     if conn_file.exists():
-        existing = tomllib.loads(conn_file.read_text())
-        if conn_name in existing:
-            print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
-            return
+        try:
+            existing = tomllib.loads(conn_file.read_text())
+        except tomllib.TOMLDecodeError as exc:
+            error(f"{conn_file} is not valid TOML: {exc}")
+    else:
+        existing = {}
+
+    # Never overwrite a connection that already exists.
+    if conn_name in existing:
+        print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
+        return
 
     # Auto-detect: look for OIDC token from parent action
     token = env_optional(token_var)
     if not token:
-        # No token -- check if file has ANY connection already
-        if conn_file.exists():
-            existing = tomllib.loads(conn_file.read_text())
-            if existing:
-                print(
-                    f"No {token_var} found, but {conn_file} has existing connections. "
-                    f"Cortex CLI can use: cortex -c <name>"
-                )
-                return
-        # No token, no file -- not an error, just skip (install-only mode)
+        # No token -- if the file already defines connections, leave them for
+        # the user; otherwise there is nothing to do (install-only mode).
+        if existing:
+            print(
+                f"No {token_var} found, but {conn_file} has existing connections. "
+                f"Cortex CLI can use: cortex -c <name>"
+            )
+            return
         print(
             f"No {token_var} in environment and no connections.toml found. "
-            "Skipping connection setup. To enable, run snowflakedb/snowflake-actions@v3 "
-            "with use-oidc: true before this action."
+            "Skipping connection setup. To enable, set use-oidc: true on this action "
+            "(or run snowflakedb/snowflake-actions@v3 with use-oidc: true before it)."
         )
         return
 
@@ -96,7 +102,6 @@ def main() -> None:
         write_toml_value(f, "user", user)
         write_toml_value(f, "authenticator", "WORKLOAD_IDENTITY")
         write_toml_value(f, "workload_identity_provider", "OIDC")
-        write_toml_value(f, "token", token)
 
         warehouse = env_optional("SNOWFLAKE_WAREHOUSE")
         if warehouse:
