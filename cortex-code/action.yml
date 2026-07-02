@@ -1,6 +1,6 @@
-# action.yml
+# cortex-code/action.yml
 name: "Cortex Code CLI"
-description: "Install and configure the Cortex Code CLI (cortex) for CI/CD workflows. Requires snowflakedb/snowflake-actions@v3 to run first."
+description: "[Public preview] Install and configure the Cortex Code CLI (cortex) for CI/CD workflows."
 branding:
   icon: "cpu"
   color: "blue"
@@ -17,12 +17,17 @@ inputs:
     default: "latest"
 
   connection-name:
-    description: "Connection name to write in connections.toml when auto-configuring from OIDC env vars"
+    description: "Connection name to write in connections.toml when configuring from OIDC env vars"
     required: false
     default: "default"
 
+  use-oidc:
+    description: "Mint a GitHub OIDC token and write a workload-identity connection. Requires 'id-token: write'. Leave false if a parent step already set the OIDC token env var."
+    required: false
+    default: "false"
+
   oidc-token-name:
-    description: "Env var name containing the OIDC token. Must match the parent action's oidc-token-name if overridden."
+    description: "Env var name containing the OIDC token. Must match the token env var set by use-oidc (or by a parent action, if it set one)."
     required: false
     default: "SNOWFLAKE_TOKEN"
 
@@ -34,32 +39,16 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Verify snow CLI is available
-      shell: bash
-      run: |
-        if ! command -v snow &>/dev/null; then
-          echo "::error::snow CLI not found. You must run snowflakedb/snowflake-actions@v3 before this action."
-          exit 1
-        fi
-
     - name: Validate inputs
       shell: bash
-      run: |
-        CHANNEL="${{ inputs.cli-channel }}"
-        if [[ "$CHANNEL" != "stable" && "$CHANNEL" != "beta" ]]; then
-          echo "::error::cli-channel must be 'stable' or 'beta', got '${CHANNEL}'"
-          exit 1
-        fi
-        VERSION="${{ inputs.cli-version }}"
-        if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::cli-version must be 'latest' or a semver (e.g. 1.5.2), got '${VERSION}'"
-          exit 1
-        fi
+      env:
+        CHANNEL: ${{ inputs.cli-channel }}
+        VERSION: ${{ inputs.cli-version }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/validate-cortex-inputs.sh
 
-    - name: Add telemetry data
+    - name: Set up action environment
       shell: bash
-      run: |
-        echo "SF_CORTEX_CODE_GITHUB_ACTION=true" >> "$GITHUB_ENV"
+      run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
 
     - name: Install Cortex Code CLI
       shell: bash
@@ -70,9 +59,19 @@ runs:
     - name: Pin specific version
       if: ${{ inputs.cli-version != 'latest' }}
       shell: bash
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        cortex update ${{ inputs.cli-version }}
+      env:
+        CORTEX_VERSION: ${{ inputs.cli-version }}
+      run: bash $GITHUB_ACTION_PATH/scripts/pin-cortex-version.sh
+
+    # Mint the OIDC token without the Snowflake CLI, so this action stands alone.
+    # If a parent step already exported the token, this is a no-op (see the
+    # script's idempotency check).
+    - name: Set up workload identity authentication
+      if: ${{ inputs.use-oidc == 'true' }}
+      shell: bash
+      env:
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: bash $GITHUB_ACTION_PATH/../scripts/oidc-token.sh
 
     - name: Configure connection
       shell: bash
@@ -84,8 +83,4 @@ runs:
     - name: Output version
       id: version
       shell: bash
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        VERSION=$(cortex --version 2>&1 | head -1)
-        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-        echo "Cortex Code CLI: ${VERSION}"
+      run: bash $GITHUB_ACTION_PATH/scripts/output-cortex-version.sh
