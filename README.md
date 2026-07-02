@@ -1,17 +1,29 @@
 # Snowflake Actions
 
-GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) in a workflow, so you can deploy dbt, Streamlit, and DCM projects, ship Snowflake App Runtime apps, run SQL, and automate any Snowflake CLI task from CI/CD.
+GitHub Action that installs and configures the [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/index) and/or the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) in a workflow, so you can deploy dbt, Streamlit, and DCM projects, ship Snowflake App Runtime apps, run SQL, run agentic Cortex Code tasks, and automate any Snowflake CLI task from CI/CD.
 
-## How it works
+## Choosing an entry point
 
-The action installs the Snowflake CLI in your workflow and can configure authentication, so later steps can run `snow` commands against Snowflake.
+Copy the `uses:` line for the tool you want:
 
-1. Installs `uv`.
-2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps.
-3. Copies your `config.toml` to `~/.snowflake/` if present (skipped if the file doesn't exist).
-4. With `use-oidc: true`, reads a GitHub OIDC token and sets the workload-identity environment variables the CLI expects.
+```yaml
+uses: snowflakedb/snowflake-actions@v3               # Snowflake CLI (default), optionally + Cortex Code
+uses: snowflakedb/snowflake-actions/snowflake-cli@v3 # Snowflake CLI only
+uses: snowflakedb/snowflake-actions/cortex-code@v3   # Cortex Code CLI only — public preview
+```
 
-## Example workflow
+| Entry point | When to use it | Docs |
+|-------------|----------------|------|
+| `snowflakedb/snowflake-actions` | The Snowflake CLI (default), optionally plus Cortex Code | this page |
+| `…/snowflake-cli` | Only the Snowflake CLI, explicitly | [Snowflake CLI action](snowflake-cli/README.md) |
+| `…/cortex-code` | Only the Cortex Code CLI **(public preview)** | [Cortex Code CLI action](cortex-code/README.md) |
+
+> [!NOTE]
+> The Cortex Code CLI (`cortex`, and the `cortex-code` option here) is in **public preview**. Its inputs and behavior may change before general availability.
+
+The root action installs the Snowflake CLI by default. Set `cortex-code: true` to also install Cortex Code, or `snowflake-cli: false` to skip the Snowflake CLI. The two subpath actions are leaf forms for callers who want one tool and nothing else; each configures OIDC on its own, so neither requires the other to run first.
+
+## Quick start
 
 Install the Snowflake CLI and run commands against Snowflake from GitHub Actions:
 
@@ -37,28 +49,43 @@ jobs:
 ```
 
 > [!IMPORTANT]
-> This example uses [OIDC](#oidc-recommended). Configure a Snowflake service user with a matching workload identity before you run it.
+> This example uses [OIDC](#authentication-oidc). Configure a Snowflake service user with a matching workload identity before you run it.
+
+To also install Cortex Code, set `cortex-code: true` — see the [Cortex Code CLI action](cortex-code/README.md) for its inputs, outputs, and examples.
 
 ## Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `cli-version` | latest | CLI version to install (e.g. `3.20.0`). |
-| `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
+| `snowflake-cli` | `true` | Install the Snowflake CLI (`snow`). |
+| `cortex-code` | `false` | Also install the Cortex Code CLI (`cortex`). |
+| `cli-version` | latest | Snowflake CLI version to install (e.g. `3.20.0`). |
+| `use-oidc` | `false` | Authenticate with a GitHub OIDC token (applies to whichever CLIs are installed). |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
-| `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
-| `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
+| `default-config-file-path` | `./config.toml` | Path to your `config.toml` (Snowflake CLI). |
+| `custom-github-ref` | none | Install the Snowflake CLI from a branch, tag, or commit. See [Install from a branch, tag, or commit](snowflake-cli/README.md#install-from-a-branch-tag-or-commit). |
+| `cortex-channel` | `stable` | Cortex Code install channel: `stable` or `beta`. |
+| `cortex-version` | `latest` | Cortex Code version to install (e.g. `1.5.2`). |
+| `connection-name` | `default` | Connection name written to `connections.toml` for Cortex Code. |
+| `cortex-prompt` | none | Optional prompt to run after Cortex Code setup — inline string or path to a prompt file (auto-detected). Applies only when `cortex-code: true`. |
+| `cortex-prompt-args` | none | Extra args appended to `cortex exec` when running `cortex-prompt` (e.g. `--max-turns 4 --output-format stream-json`). Space-separated. |
 
 - `cli-version` and `custom-github-ref` are mutually exclusive.
-- `use-oidc` needs CLI `3.11+` and `id-token: write`.
-- `custom-github-ref` installs from [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI, and requires action `v2+`.
+- `use-oidc` needs Snowflake CLI `3.11+` and `id-token: write`.
 - `default-config-file-path` is skipped if the file is absent.
+- `cortex-*` and `connection-name` apply only when `cortex-code: true`. **The standalone [`cortex-code`](cortex-code/README.md) action names these `cli-channel` / `cli-version` / `prompt` / `prompt-args`** — unknown `with:` keys are silently ignored by GitHub Actions, so use the right name for your entry point.
+- `cortex-code: true` is supported on Linux runners only (the Cortex Code CLI is Linux-only), even though the Snowflake CLI itself runs on Linux, macOS, and Windows.
 
-## Authentication
+## Outputs
 
-Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and password auth exist only as fallbacks for environments where OIDC isn't available.
+| Output | Description |
+|--------|-------------|
+| `snowflake-cli-version` | Installed Snowflake CLI version. Empty when `snowflake-cli: false`. |
+| `cortex-version` | Installed Cortex Code CLI version. Empty when `cortex-code` is not set. |
 
-### OIDC (recommended)
+## Authentication (OIDC)
+
+Use OIDC. It stores no secrets and is the only method we recommend; both the Snowflake CLI and Cortex Code use it. Credential-based auth exists only as a fallback for the Snowflake CLI — see [Credential-based auth](snowflake-cli/README.md#credential-based-auth-fallback).
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
 
@@ -103,29 +130,9 @@ jobs:
         run: snow connection test -x
 ```
 
-### Credential-based auth (fallback)
-
-Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
-
-- Pass credentials as [environment variables](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-environment-variables-for-snowflake-credentials) and use `-x` so the CLI reads them without a `config.toml`.
-- Define a connection in [`config.toml`](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#define-connections).
-
-```yaml
-# Option 1: env vars + temporary connection
-- uses: snowflakedb/snowflake-actions@v3
-- env:
-    SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-    # ...other SNOWFLAKE_* vars — see docs above
-  run: snow connection test -x
-
-# Option 2: config.toml
-- uses: snowflakedb/snowflake-actions@v3
-  with:
-    default-config-file-path: ./config.toml
-- run: snow connection test
-```
-
 ## Version pinning
+
+Pin the action reference itself:
 
 ```yaml
 - uses: snowflakedb/snowflake-actions@<sha>   # commit SHA (most secure)
@@ -133,19 +140,7 @@ Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
 - uses: snowflakedb/snowflake-actions@v3      # floating major
 ```
 
-## Install from a branch, tag, or commit
-
-Install the CLI from source (for example, to test an unreleased fix). `v2+`.
-
-```yaml
-- uses: snowflakedb/snowflake-actions@v3
-  with:
-    custom-github-ref: "feature/my-branch"   # branch, tag, or commit
-```
-
-## Platform support
-
-Runs on Linux, macOS, and Windows GitHub-hosted runners.
+To pin the *installed CLI* versions instead, use `cli-version` (Snowflake CLI) and `cortex-version` (Cortex Code).
 
 ## Security
 
@@ -153,83 +148,11 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 - **Least-privilege permissions:** OIDC needs `id-token: write`; most jobs need only `contents: read`.
 - **Set `persist-credentials: false`** on `actions/checkout`.
 - **Never commit credentials.** Inject them via GitHub Secrets at runtime.
+- **Self-hosted runners** that persist between jobs: remove any credentials the action wrote — see the cleanup notes in the [Snowflake CLI](snowflake-cli/README.md#self-hosted-runners) and [Cortex Code](cortex-code/README.md#self-hosted-runners) action docs.
 
-## Cortex Code CLI action
+## Platform support
 
-A companion action that installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. Requires `snowflakedb/snowflake-actions@v3` to run first (provides `snow` CLI and OIDC auth).
-
-```yaml
-- uses: snowflakedb/snowflake-actions@v3
-  with:
-    use-oidc: true
-
-- uses: snowflakedb/snowflake-actions/cortex-code@v3
-```
-
-### How it works
-
-1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
-2. Installs CoCo CLI from the specified channel.
-3. Pins a specific version if `cli-version` is set.
-4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
-
-### Inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
-| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. |
-| `connection-name` | `default` | Connection name written to `connections.toml`. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
-
-### Outputs
-
-| Output | Description |
-|--------|-------------|
-| `cortex-version` | Installed CoCo CLI version string. |
-
-### Example: CoCo agent workflow
-
-```yaml
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    env:
-      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: snowflakedb/snowflake-actions@v3
-        with:
-          use-oidc: true
-
-      - uses: snowflakedb/snowflake-actions/cortex-code@v3
-        with:
-          cli-channel: beta
-
-      - run: cortex exec --file .cortex/prompts/scan.md -c default --bypass --no-history
-```
-
-### Platform support
-
-Runs on Linux (ubuntu) GitHub-hosted runners. Requires Python 3.11+ on PATH (satisfied by all GitHub-hosted runners).
-
-### Self-hosted runners
-
-On self-hosted runners that persist between jobs, add a cleanup step to remove credentials:
-
-```yaml
-- name: Clean up credentials
-  if: always()
-  run: rm -f ~/.snowflake/connections.toml
-```
+The Snowflake CLI runs on Linux, macOS, and Windows GitHub-hosted runners. Cortex Code is Linux-only. See each action's docs for details.
 
 ## Support
 
