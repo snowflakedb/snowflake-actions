@@ -63,6 +63,9 @@ inputs:
     default: "SNOWFLAKE_TOKEN"
 
 outputs:
+  snowflake-cli-version:
+    description: "Installed Snowflake CLI version (empty if snowflake-cli was not installed)"
+    value: ${{ steps.snowflake-cli-version.outputs.version }}
   cortex-version:
     description: "Installed Cortex Code CLI version (empty if cortex-code was not installed)"
     value: ${{ steps.cortex-version.outputs.version }}
@@ -110,6 +113,12 @@ runs:
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
       run: bash $GITHUB_ACTION_PATH/scripts/configure-snowflake-oidc.sh
+
+    - name: Output Snowflake CLI version
+      id: snowflake-cli-version
+      if: ${{ inputs.snowflake-cli == 'true' }}
+      shell: bash
+      run: bash $GITHUB_ACTION_PATH/scripts/output-snowflake-cli-version.sh
 
     # ----------------------------------------------------------------------
     # Cortex Code CLI (cortex)

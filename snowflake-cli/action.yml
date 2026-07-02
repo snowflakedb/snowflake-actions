@@ -43,6 +43,11 @@ inputs:
     required: false
     default: "SNOWFLAKE_TOKEN"
 
+outputs:
+  snowflake-cli-version:
+    description: "Installed Snowflake CLI version"
+    value: ${{ steps.version.outputs.version }}
+
 runs:
   using: "composite"
   steps:
@@ -73,3 +78,8 @@ runs:
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
       run: bash $GITHUB_ACTION_PATH/../scripts/configure-snowflake-oidc.sh
+
+    - name: Output version
+      id: version
+      shell: bash
+      run: bash $GITHUB_ACTION_PATH/../scripts/output-snowflake-cli-version.sh

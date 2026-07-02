@@ -305,6 +305,69 @@ jobs:
           echo "$OUTPUT" | grep -q "id-token: write"
           echo "PASS: missing-endpoint path"
 
+  unit-test-validate-cortex-inputs:
+    name: Unit test validate-cortex-inputs.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: accept valid channel + version combinations"
+        shell: bash
+        run: |
+          set -e
+          # latest, plain semver, and a cortex build-metadata version.
+          for chan in stable beta; do
+            for ver in latest 1.5.2 0.26.106+015728.dcf1621f; do
+              if ! CHANNEL="$chan" VERSION="$ver" bash scripts/validate-cortex-inputs.sh; then
+                echo "FAIL: rejected valid combination channel=$chan version=$ver"
+                exit 1
+              fi
+            done
+          done
+          echo "PASS: valid inputs accepted"
+
+      - name: "Test: reject an invalid channel"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CHANNEL="nightly" VERSION="latest" bash scripts/validate-cortex-inputs.sh 2>&1) && {
+            echo "FAIL: should have rejected channel 'nightly'"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "must be 'stable' or 'beta'"
+          echo "PASS: bad channel rejected"
+
+      - name: "Test: reject malformed versions"
+        shell: bash
+        run: |
+          set -e
+          for ver in "1.5" "abc" "1.2.3.4" "v1.2.3" "1.2.3+" ""; do
+            if CHANNEL="stable" VERSION="$ver" bash scripts/validate-cortex-inputs.sh >/dev/null 2>&1; then
+              echo "FAIL: wrongly accepted version '$ver'"
+              exit 1
+            fi
+          done
+          echo "PASS: malformed versions rejected"
+
+      - name: "Test: error message names the caller's input"
+        shell: bash
+        run: |
+          set -e
+          # The root action passes cortex-version; the error must name it, not the
+          # default cli-version, so the consumer sees the input they actually set.
+          OUTPUT=$(CHANNEL="stable" VERSION="nope" \
+            VERSION_INPUT_NAME="cortex-version" \
+            bash scripts/validate-cortex-inputs.sh 2>&1) && {
+            echo "FAIL: should have rejected version 'nope'"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "cortex-version must be"
+          echo "PASS: error names cortex-version"
+
   # TODO: Enable once a service user with OIDC workload identity is provisioned
   #       for this repo and OIDC_TEST_ENABLED variable is set to 'true'.
   #

@@ -9,7 +9,8 @@
 #
 # Env:
 #   CHANNEL             Channel value to validate (stable|beta).
-#   VERSION             Version value to validate (latest|semver).
+#   VERSION             Version value to validate (latest, or a version like
+#                       1.5.2 or 0.26.106+015728.dcf1621f with build metadata).
 #   CHANNEL_INPUT_NAME  Input name for error messages (default "cli-channel").
 #   VERSION_INPUT_NAME  Input name for error messages (default "cli-version").
 
@@ -23,7 +24,9 @@ if [[ "$CHANNEL" != "stable" && "$CHANNEL" != "beta" ]]; then
     exit 1
 fi
 
-if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "::error::${VERSION_INPUT_NAME} must be 'latest' or a semver (e.g. 1.5.2), got '${VERSION}'"
+# Accept a plain X.Y.Z semver or one carrying build metadata (cortex publishes
+# versions like 0.26.106+015728.dcf1621f).
+if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z.-]+)?$ ]]; then
+    echo "::error::${VERSION_INPUT_NAME} must be 'latest' or a version (e.g. 1.5.2 or 0.26.106+015728.dcf1621f), got '${VERSION}'"
     exit 1
 fi
