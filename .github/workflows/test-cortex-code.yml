@@ -2,10 +2,17 @@ name: Test — Cortex Code action
 
 on:
   pull_request:
-    paths: ["cortex-code/**", ".github/workflows/test-cortex-code.yml"]
+    paths:
+      - "cortex-code/**"
+      - "scripts/**"
+      - "action.yml"
+      - ".github/workflows/test-cortex-code.yml"
   push:
     branches: [main]
-    paths: ["cortex-code/**"]
+    paths:
+      - "cortex-code/**"
+      - "scripts/**"
+      - "action.yml"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +70,78 @@ jobs:
           which cortex
           cortex --version
 
+  install-cortex-standalone:
+    name: Install CoCo CLI standalone (no snow)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Cortex Code CLI without the Snowflake CLI
+        uses: ./cortex-code
+
+      - name: Verify cortex is on PATH and snow is NOT installed
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+          if command -v snow &>/dev/null; then
+            echo "::error::snow should not be installed in the standalone cortex-code job"
+            exit 1
+          fi
+          echo "PASS: cortex installed standalone, snow absent"
+
+  install-both-from-root:
+    name: Install snow + CoCo from root action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install both CLIs from the root action
+        uses: ./
+        with:
+          cortex-code: true
+
+      - name: Verify both snow and cortex are on PATH
+        shell: bash
+        run: |
+          set -e
+          which snow
+          snow --version
+          which cortex
+          cortex --version
+          echo "PASS: snow + cortex both installed from root"
+
+  install-cortex-only-from-root:
+    name: Install only CoCo from root action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install only Cortex Code via the root action
+        uses: ./
+        with:
+          snowflake-cli: false
+          cortex-code: true
+
+      - name: Verify cortex present, snow absent
+        shell: bash
+        run: |
+          set -e
+          which cortex
+          cortex --version
+          if command -v snow &>/dev/null; then
+            echo "::error::snow should not be installed when snowflake-cli: false"
+            exit 1
+          fi
+          echo "PASS: only cortex installed from root"
+
   unit-test-setup-connection:
     name: Unit test setup-connection.py
     runs-on: ubuntu-latest
@@ -75,7 +154,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           unset SNOWFLAKE_TOKEN
           OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
           echo "$OUTPUT"
@@ -87,7 +167,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           export SNOWFLAKE_TOKEN="test-token-123"
           export SNOWFLAKE_ACCOUNT="test-account"
           export SNOWFLAKE_USER="test-user"
@@ -95,16 +176,22 @@ jobs:
           export SNOWFLAKE_ROLE="test-role"
           export CONNECTION_NAME="default"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           python3 cortex-code/scripts/setup-connection.py
           # Verify file exists and has correct content
           test -f "${HOME}/.snowflake/connections.toml"
           grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-account"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-user"' "${HOME}/.snowflake/connections.toml"
-          grep -q '"test-token-123"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-wh"' "${HOME}/.snowflake/connections.toml"
           grep -q '"test-role"' "${HOME}/.snowflake/connections.toml"
+          # The token is NOT persisted to the file; it is read from the
+          # SNOWFLAKE_TOKEN env var at runtime.
+          if grep -q '"test-token-123"' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: token must not be written to connections.toml"
+            exit 1
+          fi
           # Verify permissions
           PERMS=$(stat -c '%a' "${HOME}/.snowflake/connections.toml")
           test "$PERMS" = "600"
@@ -114,7 +201,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           mkdir -p "${HOME}/.snowflake"
           printf '[existing]\naccount = "old-account"\n' > "${HOME}/.snowflake/connections.toml"
           export SNOWFLAKE_TOKEN="new-token"
@@ -122,7 +210,8 @@ jobs:
           export SNOWFLAKE_USER="new-user"
           export CONNECTION_NAME="second"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           python3 cortex-code/scripts/setup-connection.py
           # Both connections should exist
           grep -q '\[existing\]' "${HOME}/.snowflake/connections.toml"
@@ -134,7 +223,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           mkdir -p "${HOME}/.snowflake"
           printf '[default]\naccount = "existing-account"\n' > "${HOME}/.snowflake/connections.toml"
           export SNOWFLAKE_TOKEN="should-not-be-written"
@@ -142,31 +232,230 @@ jobs:
           export SNOWFLAKE_USER="should-not-be-written"
           export CONNECTION_NAME="default"
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           OUTPUT=$(python3 cortex-code/scripts/setup-connection.py 2>&1)
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "already exists"
           # Original content unchanged
           grep -q '"existing-account"' "${HOME}/.snowflake/connections.toml"
-          ! grep -q '"should-not-be-written"' "${HOME}/.snowflake/connections.toml"
+          if grep -q '"should-not-be-written"' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: existing connection was overwritten"
+            exit 1
+          fi
           echo "PASS: no-overwrite path"
 
       - name: "Test: reject invalid connection name"
         shell: bash
         run: |
           set -e
-          export HOME=$(mktemp -d)
+          HOME=$(mktemp -d)
+          export HOME
           export SNOWFLAKE_TOKEN="token"
           export SNOWFLAKE_ACCOUNT="acct"
           export SNOWFLAKE_USER="user"
           export CONNECTION_NAME='evil]\ninjection = "pwned'
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export GITHUB_ENV=$(mktemp)
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
           if python3 cortex-code/scripts/setup-connection.py 2>&1; then
             echo "FAIL: should have rejected invalid connection name"
             exit 1
           fi
           echo "PASS: validation rejected bad name"
+
+  unit-test-oidc-token:
+    name: Unit test oidc-token.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: reuse a token already in the environment"
+        shell: bash
+        run: |
+          set -e
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          export SNOWFLAKE_TOKEN="already-minted-token"
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
+          OUTPUT=$(bash scripts/oidc-token.sh 2>&1)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "reusing it"
+          # Reuse must not append anything to the environment file.
+          test ! -s "$GITHUB_ENV"
+          echo "PASS: reuse path"
+
+      - name: "Test: error when the id-token endpoint is unavailable"
+        shell: bash
+        run: |
+          set -e
+          export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
+          unset SNOWFLAKE_TOKEN
+          unset ACTIONS_ID_TOKEN_REQUEST_URL
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
+          if OUTPUT=$(bash scripts/oidc-token.sh 2>&1); then
+            echo "FAIL: should have errored without the id-token endpoint"
+            exit 1
+          fi
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "id-token: write"
+          echo "PASS: missing-endpoint path"
+
+  unit-test-validate-cortex-inputs:
+    name: Unit test validate-cortex-inputs.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: accept valid channel + version combinations"
+        shell: bash
+        run: |
+          set -e
+          # latest, plain semver, and a cortex build-metadata version.
+          for chan in stable beta; do
+            for ver in latest 1.5.2 0.26.106+015728.dcf1621f; do
+              if ! CHANNEL="$chan" VERSION="$ver" bash scripts/validate-cortex-inputs.sh; then
+                echo "FAIL: rejected valid combination channel=$chan version=$ver"
+                exit 1
+              fi
+            done
+          done
+          echo "PASS: valid inputs accepted"
+
+      - name: "Test: reject an invalid channel"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CHANNEL="nightly" VERSION="latest" bash scripts/validate-cortex-inputs.sh 2>&1) && {
+            echo "FAIL: should have rejected channel 'nightly'"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "must be 'stable' or 'beta'"
+          echo "PASS: bad channel rejected"
+
+      - name: "Test: reject malformed versions"
+        shell: bash
+        run: |
+          set -e
+          for ver in "1.5" "abc" "1.2.3.4" "v1.2.3" "1.2.3+" ""; do
+            if CHANNEL="stable" VERSION="$ver" bash scripts/validate-cortex-inputs.sh >/dev/null 2>&1; then
+              echo "FAIL: wrongly accepted version '$ver'"
+              exit 1
+            fi
+          done
+          echo "PASS: malformed versions rejected"
+
+      - name: "Test: error message names the caller's input"
+        shell: bash
+        run: |
+          set -e
+          # The root action passes cortex-version; the error must name it, not the
+          # default cli-version, so the consumer sees the input they actually set.
+          OUTPUT=$(CHANNEL="stable" VERSION="nope" \
+            VERSION_INPUT_NAME="cortex-version" \
+            bash scripts/validate-cortex-inputs.sh 2>&1) && {
+            echo "FAIL: should have rejected version 'nope'"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "cortex-version must be"
+          echo "PASS: error names cortex-version"
+
+  unit-test-run-prompt:
+    name: Unit test run-prompt.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Put a fake cortex on PATH
+        shell: bash
+        run: |
+          set -e
+          # A stub that records its argv (one per line) and exits with
+          # FAKE_CORTEX_EXIT, so tests assert the exact `cortex exec` line
+          # run-prompt.sh builds without needing Snowflake or the real CLI.
+          FAKE_BIN="${RUNNER_TEMP}/fakebin"
+          mkdir -p "$FAKE_BIN"
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'printf "%s\n" "$@" > "${CORTEX_ARGS_FILE:?}"' \
+            'exit "${FAKE_CORTEX_EXIT:-0}"' > "$FAKE_BIN/cortex"
+          chmod +x "$FAKE_BIN/cortex"
+          echo "$FAKE_BIN" >> "$GITHUB_PATH"
+
+      - name: "Test: inline prompt -> positional arg + fixed CI flags"
+        shell: bash
+        env:
+          CORTEX_ARGS_FILE: ${{ runner.temp }}/args-inline.txt
+        run: |
+          set -e
+          CORTEX_PROMPT="summarize the repo" bash cortex-code/scripts/run-prompt.sh
+          cat "$CORTEX_ARGS_FILE"
+          diff <(printf '%s\n' exec "summarize the repo" -c default --bypass --no-history) \
+            "$CORTEX_ARGS_FILE"
+          echo "PASS: inline prompt"
+
+      - name: "Test: existing file path -> --file"
+        shell: bash
+        env:
+          CORTEX_ARGS_FILE: ${{ runner.temp }}/args-file.txt
+        run: |
+          set -e
+          PROMPT_FILE="${RUNNER_TEMP}/prompt.md"
+          echo "do the thing" > "$PROMPT_FILE"
+          CORTEX_PROMPT="$PROMPT_FILE" bash cortex-code/scripts/run-prompt.sh
+          cat "$CORTEX_ARGS_FILE"
+          diff <(printf '%s\n' exec --file "$PROMPT_FILE" -c default --bypass --no-history) \
+            "$CORTEX_ARGS_FILE"
+          echo "PASS: file prompt"
+
+      - name: "Test: connection-name + prompt-args passthrough"
+        shell: bash
+        env:
+          CORTEX_ARGS_FILE: ${{ runner.temp }}/args-extra.txt
+        run: |
+          set -e
+          CORTEX_PROMPT="hi" CONNECTION_NAME="myconn" \
+            CORTEX_PROMPT_ARGS="--max-turns 4 --format json" \
+            bash cortex-code/scripts/run-prompt.sh
+          cat "$CORTEX_ARGS_FILE"
+          diff <(printf '%s\n' exec hi -c myconn --bypass --no-history --max-turns 4 --format json) \
+            "$CORTEX_ARGS_FILE"
+          echo "PASS: connection + passthrough args"
+
+      - name: "Test: empty prompt errors"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CORTEX_PROMPT="" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
+            echo "FAIL: should have errored on empty prompt"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "empty prompt"
+          echo "PASS: empty prompt rejected"
+
+      - name: "Test: non-zero cortex exit fails the step"
+        shell: bash
+        env:
+          CORTEX_ARGS_FILE: ${{ runner.temp }}/args-fail.txt
+          FAKE_CORTEX_EXIT: "3"
+        run: |
+          set -e
+          if CORTEX_PROMPT="boom" bash cortex-code/scripts/run-prompt.sh; then
+            echo "FAIL: run-prompt.sh should have propagated the non-zero exit"
+            exit 1
+          fi
+          echo "PASS: cortex failure propagated"
 
   # TODO: Enable once a service user with OIDC workload identity is provisioned
   #       for this repo and OIDC_TEST_ENABLED variable is set to 'true'.
