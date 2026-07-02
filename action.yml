@@ -84,6 +84,8 @@ runs:
     # a different interpreter (e.g. requires-python >=3.13). The CLI's Python is
     # pinned per-install below via `uv tool install --python 3.11` instead, which
     # scopes the pin to the isolated tool environment without touching the job.
+    #
+    # Keep the pinned setup-uv SHA in sync with snowflake-cli/action.yml.
     - if: ${{ inputs.snowflake-cli == 'true' }}
       uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
 
@@ -139,9 +141,7 @@ runs:
       shell: bash
       env:
         CORTEX_VERSION: ${{ inputs.cortex-version }}
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        cortex update "$CORTEX_VERSION"
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/pin-cortex-version.sh
 
     - name: Set up workload identity authentication (Cortex Code)
       if: ${{ inputs.cortex-code == 'true' && inputs.use-oidc == 'true' }}
@@ -162,8 +162,4 @@ runs:
       id: cortex-version
       if: ${{ inputs.cortex-code == 'true' }}
       shell: bash
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        VERSION=$(cortex --version 2>&1 | head -1)
-        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-        echo "Cortex Code CLI: ${VERSION}"
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/output-cortex-version.sh

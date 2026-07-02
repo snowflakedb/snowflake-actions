@@ -60,10 +60,8 @@ runs:
       if: ${{ inputs.cli-version != 'latest' }}
       shell: bash
       env:
-        CLI_VERSION: ${{ inputs.cli-version }}
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        cortex update "$CLI_VERSION"
+        CORTEX_VERSION: ${{ inputs.cli-version }}
+      run: bash $GITHUB_ACTION_PATH/scripts/pin-cortex-version.sh
 
     # Mint the OIDC token without the Snowflake CLI, so this action stands alone.
     # If a parent step already exported the token, this is a no-op (see the
@@ -85,8 +83,4 @@ runs:
     - name: Output version
       id: version
       shell: bash
-      run: |
-        export PATH="${HOME}/.local/bin:$PATH"
-        VERSION=$(cortex --version 2>&1 | head -1)
-        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-        echo "Cortex Code CLI: ${VERSION}"
+      run: bash $GITHUB_ACTION_PATH/scripts/output-cortex-version.sh

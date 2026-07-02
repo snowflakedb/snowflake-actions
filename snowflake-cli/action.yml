@@ -51,6 +51,7 @@ runs:
       run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh
 
     # See the root action.yml for why `python-version` is intentionally omitted.
+    # Keep the pinned setup-uv SHA in sync with the root action.yml.
     - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
 
     - name: Install Snowflake CLI

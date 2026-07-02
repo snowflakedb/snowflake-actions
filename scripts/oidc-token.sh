@@ -3,10 +3,12 @@
 # Mint a GitHub Actions OIDC token for Snowflake workload-identity auth WITHOUT
 # requiring the Snowflake CLI.
 #
-# This is the snow-free equivalent of `snow auth oidc read-token --type=github`:
-# both request the GitHub-issued JWT for audience "snowflakecomputing.com" from
-# the Actions OIDC endpoint. Keeping this independent lets the Cortex Code action
-# authenticate on its own, without installing `snow` first.
+# This is the single token-minting path for the whole repo: the Cortex Code
+# action calls it directly, and the snow-install path calls it via
+# configure-snowflake-oidc.sh. It replaces `snow auth oidc read-token
+# --type=github` — both request the GitHub-issued JWT for audience
+# "snowflakecomputing.com" from the Actions OIDC endpoint — so minting, masking,
+# and idempotency live in exactly one place and neither path needs `snow`.
 #
 # Idempotent: if a prior step (e.g. the snow-install OIDC path) already exported
 # the token, it is reused rather than re-minted.
@@ -49,5 +51,10 @@ if [ -z "$token" ]; then
 fi
 
 echo "::add-mask::${token}"
-echo "${TOKEN_NAME_UPPER}=${token}" >> "$GITHUB_ENV"
+{
+    echo "${TOKEN_NAME_UPPER}=${token}"
+    # Record the auth type this action configured (telemetry). Set here on the
+    # shared minting path so both the snow and Cortex Code paths report it.
+    echo "SF_CICD_AUTH_TYPE=oidc"
+} >> "$GITHUB_ENV"
 echo "Minted GitHub OIDC token into \$${TOKEN_NAME_UPPER} (audience: ${AUDIENCE})."

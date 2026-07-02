@@ -47,26 +47,25 @@ def main() -> None:
             "Only alphanumeric characters, hyphens, and underscores are allowed."
         )
 
-    # Check if connection already exists
-    if conn_file.exists():
-        existing = tomllib.loads(conn_file.read_text())
-        if conn_name in existing:
-            print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
-            return
+    # Read existing connections once (empty dict if the file is absent).
+    existing = tomllib.loads(conn_file.read_text()) if conn_file.exists() else {}
+
+    # Never overwrite a connection that already exists.
+    if conn_name in existing:
+        print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
+        return
 
     # Auto-detect: look for OIDC token from parent action
     token = env_optional(token_var)
     if not token:
-        # No token -- check if file has ANY connection already
-        if conn_file.exists():
-            existing = tomllib.loads(conn_file.read_text())
-            if existing:
-                print(
-                    f"No {token_var} found, but {conn_file} has existing connections. "
-                    f"Cortex CLI can use: cortex -c <name>"
-                )
-                return
-        # No token, no file -- not an error, just skip (install-only mode)
+        # No token -- if the file already defines connections, leave them for
+        # the user; otherwise there is nothing to do (install-only mode).
+        if existing:
+            print(
+                f"No {token_var} found, but {conn_file} has existing connections. "
+                f"Cortex CLI can use: cortex -c <name>"
+            )
+            return
         print(
             f"No {token_var} in environment and no connections.toml found. "
             "Skipping connection setup. To enable, set use-oidc: true on this action "
