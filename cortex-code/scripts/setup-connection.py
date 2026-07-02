@@ -14,6 +14,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 try:
     import tomllib
@@ -21,7 +22,7 @@ except ModuleNotFoundError:
     sys.exit("::error::Python 3.11+ required (tomllib not available).")
 
 
-def error(msg: str) -> None:
+def error(msg: str) -> NoReturn:
     print(f"::error::{msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -48,7 +49,13 @@ def main() -> None:
         )
 
     # Read existing connections once (empty dict if the file is absent).
-    existing = tomllib.loads(conn_file.read_text()) if conn_file.exists() else {}
+    if conn_file.exists():
+        try:
+            existing = tomllib.loads(conn_file.read_text())
+        except tomllib.TOMLDecodeError as exc:
+            error(f"{conn_file} is not valid TOML: {exc}")
+    else:
+        existing = {}
 
     # Never overwrite a connection that already exists.
     if conn_name in existing:

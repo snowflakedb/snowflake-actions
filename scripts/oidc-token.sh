@@ -41,9 +41,14 @@ response=$(curl -sS --fail \
     -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
     "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}")
 
-# Parse the JSON {"value": "<jwt>"} with the stdlib (python3 is guaranteed on
-# GitHub-hosted runners and is already required by setup-connection.py).
-token=$(echo "$response" | python3 -c 'import sys, json; print(json.load(sys.stdin)["value"])')
+# Parse the JSON {"value": "<jwt>"} with the stdlib. Prefer python3, falling
+# back to python (Windows runners expose the interpreter as `python`).
+PYTHON="$(command -v python3 || command -v python || true)"
+if [ -z "$PYTHON" ]; then
+    echo "::error::No python interpreter (python3 or python) found to parse the OIDC token."
+    exit 1
+fi
+token=$(echo "$response" | "$PYTHON" -c 'import sys, json; print(json.load(sys.stdin)["value"])')
 
 if [ -z "$token" ]; then
     echo "::error::Failed to obtain an OIDC token from GitHub."
