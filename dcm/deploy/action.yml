@@ -1,0 +1,344 @@
+# Snowflake DCM Deploy Action
+#
+# Runs `snow dcm deploy` against a target with optional drop detection,
+# dynamic table refresh, and data quality testing.
+#
+# Prerequisites:
+#   The calling workflow MUST set these permissions:
+#
+#     permissions:
+#       id-token: write
+#       contents: read
+#
+#   The job MUST use a GitHub Environment whose name matches the target.
+#   The dcm-plan action MUST run before this action (it produces the
+#   plan_result.json used for drop detection).
+#
+# Example usage (minimal):
+#
+#   jobs:
+#     deploy:
+#       runs-on: ubuntu-latest
+#       environment: DCM_STAGE
+#       permissions:
+#         id-token: write
+#         contents: read
+#       steps:
+#         - uses: actions/checkout@v4
+#         - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+#           with:
+#             target: DCM_STAGE
+#             project-path: Quickstarts/DCM_Project_Quickstart_1/
+#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
+#
+# Example usage (full pipeline with testing):
+#
+#   - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+#     with:
+#       target: DCM_STAGE
+#       project-path: Quickstarts/DCM_Project_Quickstart_1/
+#       snowflake-user: ${{ env.SNOWFLAKE_USER }}
+#       allow-drops: "false"
+#       test-expectations: "true"
+#       comment-on-pr: "true"
+#
+#   The deployment alias is set automatically to the source branch of the
+#   associated pull request combined with the short commit SHA (e.g.
+#   my-branch-a1b2c3d) so it stays unique per commit. If no PR branch can
+#   be found, no alias is passed.
+#
+#   When comment-on-pr is enabled, the calling job also needs:
+#
+#     permissions:
+#       id-token: write
+#       contents: read
+#       pull-requests: write
+
+name: "Snowflake DCM Deploy"
+description: "Deploy a DCM project to a target with optional drop detection, DT refresh, and expectation testing."
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  target:
+    description: "DCM target name from manifest.yml (e.g. DCM_STAGE, DCM_PROD_US)"
+    required: true
+  project-path:
+    description: "Path to the DCM project directory (containing manifest.yml)"
+    required: true
+  snowflake-user:
+    description: "Snowflake username for OIDC authentication"
+    required: true
+  allow-drops:
+    description: "Allow DROP of DATABASE, SCHEMA, TABLE, or STAGE. Set to 'true' to skip drop detection."
+    required: false
+    default: "false"
+  test-expectations:
+    description: "Refresh all dynamic tables and then run snow dcm test after deploy"
+    required: false
+    default: "false"
+  comment-on-pr:
+    description: "Post a deploy summary comment on the associated pull request"
+    required: false
+    default: "false"
+  post-scripts-path:
+    description: "Relative path (from project-path) to a directory of .sql files to run after deploy, before refresh/test. Files are executed alphabetically with Jinja templating using manifest variables."
+    required: false
+    default: ""
+
+outputs:
+  deploy-result:
+    description: "'success' or 'failure'"
+    value: ${{ steps.deploy.outputs.result || 'failure' }}
+  test-result:
+    description: "'success', 'failure', or 'skipped'"
+    value: ${{ steps.test.outputs.result || 'skipped' }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-cli-action@v2.0.2
+      with:
+        use-oidc: true
+        custom-github-ref: "dcm-early-access"
+
+    - name: Set connection env vars
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SNOWFLAKE_USER: ${{ inputs.snowflake-user }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_read_manifest
+        echo "GHA_SUMMARY_FILE=/tmp/dcm-deploy-summary.md" >> "$GITHUB_ENV"
+        : > /tmp/dcm-deploy-summary.md
+
+    - name: Check for destructive drops
+      id: drop_check
+      if: inputs.allow-drops != 'true'
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      run: |
+        PLAN_FILE="out/plan/plan_result.json"
+        if [ ! -f "$PLAN_FILE" ]; then
+          echo "### ⚠️ Plan output file not found at \`$PLAN_FILE\`! Run the dcm-plan action first." | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+
+        DESTRUCTIVE_COMMANDS=$(jq -c '[.changeset[] | select(.type == "DROP" and (.object_id.domain | IN("DATABASE", "SCHEMA", "TABLE", "STAGE")))]' "$PLAN_FILE")
+        TOTAL_DROPS=$(echo "$DESTRUCTIVE_COMMANDS" | jq 'length')
+
+        if [ "$TOTAL_DROPS" -gt 0 ]; then
+          {
+            echo "### ⚠️ PLAN contains DROP commands"
+            echo "The plan contains **${TOTAL_DROPS}** DROP operation(s) for:"
+            echo '```'
+            echo "$DESTRUCTIVE_COMMANDS" | jq -r '.[] | "- \(.object_id.domain) \(.object_id.fqn)"'
+            echo '```'
+          } | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        else
+          echo "### ✅ PLAN contains no DROP DATABASE | SCHEMA | TABLE | STAGE commands" | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Detect PR source branch
+      id: pr_branch
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { resolvePrBranch } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          const branch = await resolvePrBranch(github, context);
+          if (branch) {
+            console.log(`Detected PR source branch: ${branch}`);
+          } else {
+            console.log('No associated PR branch found.');
+          }
+          core.setOutput('branch', branch);
+
+    - name: Deploy
+      id: deploy
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
+
+        TARGET="${{ inputs.target }}"
+
+        ALIAS_ARG=()
+        PR_BRANCH="${{ steps.pr_branch.outputs.branch }}"
+        if [ -n "$PR_BRANCH" ]; then
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          ALIAS_ARG=(--alias "${PR_BRANCH}-${SHORT_SHA}")
+        fi
+
+        DEPLOY_OUTPUT_FILE="/tmp/dcm-deploy-cli-output.txt"
+
+        snow dcm deploy --target "$TARGET" "${ALIAS_ARG[@]}" -x 2>&1 | tee "$DEPLOY_OUTPUT_FILE"
+        EXIT_CODE="${PIPESTATUS[0]}"
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          echo "result=success" >> "$GITHUB_OUTPUT"
+          gha_emit_summary success "DCM Deploy to ${TARGET} successful" "$DEPLOY_OUTPUT_FILE"
+        else
+          echo "result=failure" >> "$GITHUB_OUTPUT"
+          gha_emit_summary failure "DCM Deploy to ${TARGET} failed" "$DEPLOY_OUTPUT_FILE"
+          exit "$EXIT_CODE"
+        fi
+
+    - name: Run post-scripts
+      id: post_scripts
+      if: always() && steps.deploy.outputs.result == 'success' && inputs.post-scripts-path != ''
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      run: |
+        TARGET="${{ inputs.target }}"
+        SCRIPTS_DIR="${{ inputs.post-scripts-path }}"
+        MANIFEST_PATH="manifest.yml"
+
+        if [ ! -d "$SCRIPTS_DIR" ]; then
+          echo "### ⚠️ Post-scripts directory \`$SCRIPTS_DIR\` not found" | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+
+        # Resolve templating_config for this target
+        CONFIG_NAME=$(yq eval ".targets.$TARGET.templating_config" "$MANIFEST_PATH" | sed 's/"//g' | sed "s/'//g")
+
+        # Build --variable flags from manifest defaults + config overrides (scalar values only)
+        VARIABLE_ARGS=()
+        for KEY in $(yq eval '.templating.defaults | keys | .[]' "$MANIFEST_PATH"); do
+          VALUE=$(yq eval ".templating.defaults.$KEY" "$MANIFEST_PATH")
+          if [ "$(echo "$VALUE" | yq eval 'tag')" != "!!seq" ] && [ "$(echo "$VALUE" | yq eval 'tag')" != "!!map" ]; then
+            VARIABLE_ARGS+=(--variable "$KEY=$(echo "$VALUE" | sed 's/"//g' | sed "s/'//g")")
+          fi
+        done
+        for KEY in $(yq eval ".templating.configurations.$CONFIG_NAME | keys | .[]" "$MANIFEST_PATH"); do
+          VALUE=$(yq eval ".templating.configurations.$CONFIG_NAME.$KEY" "$MANIFEST_PATH")
+          if [ "$(echo "$VALUE" | yq eval 'tag')" != "!!seq" ] && [ "$(echo "$VALUE" | yq eval 'tag')" != "!!map" ]; then
+            VARIABLE_ARGS+=(--variable "$KEY=$(echo "$VALUE" | sed 's/"//g' | sed "s/'//g")")
+          fi
+        done
+
+        echo "Resolved variables: ${VARIABLE_ARGS[*]}"
+
+        # Run all .sql files alphabetically
+        SCRIPT_COUNT=0
+        FAIL_COUNT=0
+        for SQL_FILE in $(ls "$SCRIPTS_DIR"/*.sql 2>/dev/null | sort); do
+          SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
+          FILENAME=$(basename "$SQL_FILE")
+          echo "Running: $FILENAME"
+
+          set +e
+          SQL_OUTPUT=$(snow sql -f "$SQL_FILE" "${VARIABLE_ARGS[@]}" --enable-templating JINJA -x 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+            {
+              echo "### ❌ Post-script \`$FILENAME\` failed"
+              echo '```'
+              echo "$SQL_OUTPUT"
+              echo '```'
+            } | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        done
+
+        if [ "$SCRIPT_COUNT" -eq 0 ]; then
+          echo "🚫 No .sql files found in \`$SCRIPTS_DIR\`." | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$FAIL_COUNT" -eq 0 ]; then
+          echo "### ✅ ${SCRIPT_COUNT} of ${SCRIPT_COUNT} post-scripts succeeded" | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "### ❌ ${FAIL_COUNT} of ${SCRIPT_COUNT} post-scripts failed" | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+
+    - name: Refresh dynamic tables and test expectations
+      id: test
+      if: always() && steps.deploy.outputs.result == 'success' && steps.post_scripts.outcome != 'failure' && inputs.test-expectations == 'true'
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
+
+        TARGET="${{ inputs.target }}"
+
+        # --- Refresh dynamic tables ---
+        REFRESH_OUTPUT_FILE="/tmp/dcm-refresh-cli-output.txt"
+
+        snow dcm refresh --target "$TARGET" --save-output -x 2>&1 | tee "$REFRESH_OUTPUT_FILE"
+        EXIT_CODE="${PIPESTATUS[0]}"
+
+        if [ "$EXIT_CODE" -eq 0 ]; then
+          gha_emit_summary success "Dynamic Tables Refresh successful" "$REFRESH_OUTPUT_FILE"
+        else
+          gha_emit_summary failure "Dynamic Tables Refresh Failed" "$REFRESH_OUTPUT_FILE"
+          echo "result=failure" >> "$GITHUB_OUTPUT"
+          exit "$EXIT_CODE"
+        fi
+
+        # --- Test data quality expectations ---
+        TEST_FILE="out/test.json"
+        TEST_OUTPUT_FILE="/tmp/dcm-test-cli-output.txt"
+
+        snow dcm test --target "$TARGET" --save-output -x 2>&1 | tee "$TEST_OUTPUT_FILE"
+        EXIT_CODE="${PIPESTATUS[0]}"
+
+        if [ "$EXIT_CODE" -eq 0 ] && [ -f "$TEST_FILE" ]; then
+          VIOLATED=$(jq '[.expectations[] | select(.expectation_violated == true)] | length' "$TEST_FILE")
+
+          if [ "$VIOLATED" -eq 0 ]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            gha_emit_summary success "Data Quality Tests passed" "$TEST_OUTPUT_FILE"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            gha_emit_summary failure "Data Quality — ${VIOLATED} expectation(s) violated" "$TEST_OUTPUT_FILE"
+            exit 1
+          fi
+        else
+          echo "result=failure" >> "$GITHUB_OUTPUT"
+          gha_emit_summary failure "Data Quality Test Failed" "$TEST_OUTPUT_FILE"
+          exit "$EXIT_CODE"
+        fi
+
+    - name: Write result artifacts
+      if: always()
+      shell: bash
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        TARGET="${{ inputs.target }}"
+
+        DEPLOY_RESULT="${{ steps.deploy.outputs.result }}"
+        dcm_write_result deploy "$TARGET" "${DEPLOY_RESULT:-failure}"
+
+        if [ "${{ inputs.test-expectations }}" = "true" ]; then
+          TEST_RESULT="${{ steps.test.outputs.result }}"
+          dcm_write_result test "$TARGET" "${TEST_RESULT:-skipped}"
+        else
+          dcm_write_result test "$TARGET" "skipped"
+        fi
+
+    - name: Upload deploy result artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dcm-deploy-${{ inputs.target }}
+        path: /tmp/dcm-results/dcm-deploy-${{ inputs.target }}.txt
+
+    - name: Upload test result artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dcm-test-${{ inputs.target }}
+        path: /tmp/dcm-results/dcm-test-${{ inputs.target }}.txt
+
+    - name: Comment on PR
+      if: always() && inputs.comment-on-pr == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postSummaryComment(github, context, '/tmp/dcm-deploy-summary.md', 'Could not read deploy summary.');
