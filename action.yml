@@ -1,11 +1,23 @@
-﻿# action.yml
+# action.yml
 name: "Snowflake Actions"
-description: "Snowflake CI/CD actions for GitHub. Plan, deploy, and test Snowflake projects from your workflows."
+description: "Snowflake CI/CD actions for GitHub. Install the Snowflake CLI and/or the Cortex Code CLI, and configure authentication."
 branding:
   icon: "terminal"
   color: "blue"
 
 inputs:
+  # --- What to install ---------------------------------------------------
+  snowflake-cli:
+    description: "Install the Snowflake CLI (snow)."
+    required: false
+    default: "true"
+
+  cortex-code:
+    description: "Install the Cortex Code CLI (cortex). Public preview."
+    required: false
+    default: "false"
+
+  # --- Snowflake CLI options ---------------------------------------------
   cli-version:
     description: "Snowflake CLI version (by default, installs the latest version)"
     required: false
@@ -16,9 +28,41 @@ inputs:
     default: "./config.toml"
 
   custom-github-ref:
-    description: "GitHub branch, tag, or commit to install from (if set, installs from GitHub; otherwise, installs from PyPI)"
+    description: "GitHub branch, tag, or commit to install the Snowflake CLI from (if set, installs from GitHub; otherwise, installs from PyPI)"
     required: false
 
+  # --- Cortex Code CLI options -------------------------------------------
+  cortex-channel:
+    description: "Cortex Code CLI install channel: stable or beta"
+    required: false
+    default: "stable"
+
+  cortex-version:
+    description: "Cortex Code CLI version to install (e.g. 1.5.2). Use 'latest' for the newest in the channel."
+    required: false
+    default: "latest"
+
+  connection-name:
+    description: "Connection name written to connections.toml when configuring the Cortex Code CLI from OIDC"
+    required: false
+    default: "default"
+
+  cortex-prompt:
+    description: "Optional inline Cortex Code prompt string to run after setup (only when cortex-code: true). Mutually exclusive with cortex-prompt-file. Leave both empty to install and configure only."
+    required: false
+    default: ""
+
+  cortex-prompt-file:
+    description: "Optional path to a file containing the Cortex Code prompt to run after setup (only when cortex-code: true). Mutually exclusive with cortex-prompt."
+    required: false
+    default: ""
+
+  cortex-prompt-args:
+    description: "Extra arguments appended to `cortex exec` when running cortex-prompt/cortex-prompt-file (e.g. '--max-turns 4 --output-format stream-json'). Space-separated; quoted arguments containing spaces are not supported."
+    required: false
+    default: ""
+
+  # --- Shared authentication options -------------------------------------
   use-oidc:
     description: "Enable OIDC authentication"
     required: false
@@ -26,24 +70,31 @@ inputs:
 
   oidc-token-name:
     description: >-
-      "Name of the token environment variable for OIDC authentication."
-      " By default it's set for [temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection), "
-      "however it can be changed to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections."
+      Name of the token environment variable for OIDC authentication. By default it is set for
+      temporary connections
+      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
+      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
     required: false
     default: "SNOWFLAKE_TOKEN"
+
+outputs:
+  snowflake-cli-version:
+    description: "Installed Snowflake CLI version (empty if snowflake-cli was not installed)"
+    value: ${{ steps.snowflake-cli-version.outputs.version }}
+  cortex-version:
+    description: "Installed Cortex Code CLI version (empty if cortex-code was not installed)"
+    value: ${{ steps.cortex-version.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: add extra telemetry data
+    - name: Set up action environment
       shell: bash
-      env:
-        # Bump on each release to match the repository tag
-        SF_CICD_INTEGRATION_VERSION: "v3.0.0"
-      run: |
-        echo "SF_GITHUB_ACTION=true" >> "$GITHUB_ENV"
-        echo "SF_CICD_INTEGRATION_VERSION=$SF_CICD_INTEGRATION_VERSION" >> "$GITHUB_ENV"
+      run: bash $GITHUB_ACTION_PATH/scripts/setup-environment.sh
 
+    # ----------------------------------------------------------------------
+    # Snowflake CLI (snow)
+    # ----------------------------------------------------------------------
     # Intentionally no `python-version` here. When set, setup-uv exports
     # UV_PYTHON into $GITHUB_ENV, which persists into every later step of the
     # consumer's job. That leaks our internal Python pin (3.11) into their
@@ -51,44 +102,98 @@ runs:
     # a different interpreter (e.g. requires-python >=3.13). The CLI's Python is
     # pinned per-install below via `uv tool install --python 3.11` instead, which
     # scopes the pin to the isolated tool environment without touching the job.
-    - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
+    #
+    # Keep the pinned setup-uv SHA in sync with snowflake-cli/action.yml.
+    - if: ${{ inputs.snowflake-cli == 'true' }}
+      uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
 
-    - name: Either cli-version or custom-github-ref allowed
-      if: ${{ inputs.cli-version != '' && inputs.custom-github-ref != '' }}
+    - name: Install Snowflake CLI
+      if: ${{ inputs.snowflake-cli == 'true' }}
       shell: bash
-      run: |
-        echo "You cannot set BOTH cli-version and custom-github-ref"
-        exit 1
-
-    - name: Install snowflake-cli (specific version)
-      if: ${{ inputs.cli-version != '' && inputs.cli-version != 'latest' && inputs.custom-github-ref == '' }}
-      shell: bash
-      run: uv tool install --python 3.11 snowflake-cli==${{ inputs.cli-version }}
-
-    - name: Install snowflake-cli (custom ref)
-      if: ${{ inputs.cli-version == '' && inputs.custom-github-ref != '' }}
-      shell: bash
-      run: uv tool install --python 3.11 "git+https://github.com/snowflakedb/snowflake-cli.git@${{ inputs.custom-github-ref }}"
-
-    - name: Install snowflake-cli (latest release)
-      if: ${{ (inputs.cli-version == '' || inputs.cli-version == 'latest') && inputs.custom-github-ref == '' }}
-      shell: bash
-      run: uv tool install --python 3.11 snowflake-cli
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        CUSTOM_GITHUB_REF: ${{ inputs.custom-github-ref }}
+      run: bash $GITHUB_ACTION_PATH/scripts/install-snowflake-cli.sh
 
     - name: Set up config.toml
+      if: ${{ inputs.snowflake-cli == 'true' }}
       shell: bash
       run: bash $GITHUB_ACTION_PATH/scripts/setup-config-file.sh
       env:
         CONFIG_FILE_PATH: ${{ inputs.default-config-file-path }}
 
-    - name: Set up workload identity authentication
-      if: ${{ inputs.use-oidc == 'true' }}
+    - name: Set up workload identity authentication (Snowflake CLI)
+      if: ${{ inputs.snowflake-cli == 'true' && inputs.use-oidc == 'true' }}
       shell: bash
-      run: |
-        echo "SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY" >> "$GITHUB_ENV"
-        echo "SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=OIDC" >> "$GITHUB_ENV"
-        echo "SNOWFLAKE_AUDIENCE=snowflakecomputing.com" >> "$GITHUB_ENV"
-        # Telemetry: tell the CLI which auth type this action configured.
-        echo "SF_CICD_AUTH_TYPE=oidc" >> "$GITHUB_ENV"
-        TOKEN_NAME_UPPER=$(echo ${{ inputs.oidc-token-name }} | tr '[:lower:]' '[:upper:]')
-        echo "${TOKEN_NAME_UPPER}=$(snow auth oidc read-token --type=github)" >> "$GITHUB_ENV"
+      env:
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: bash $GITHUB_ACTION_PATH/scripts/configure-snowflake-oidc.sh
+
+    - name: Output Snowflake CLI version
+      id: snowflake-cli-version
+      if: ${{ inputs.snowflake-cli == 'true' }}
+      shell: bash
+      run: bash $GITHUB_ACTION_PATH/scripts/output-snowflake-cli-version.sh
+
+    # ----------------------------------------------------------------------
+    # Cortex Code CLI (cortex)
+    # ----------------------------------------------------------------------
+    - name: Add Cortex Code component marker
+      if: ${{ inputs.cortex-code == 'true' }}
+      shell: bash
+      run: echo "SF_CORTEX_CODE_GITHUB_ACTION=true" >> "$GITHUB_ENV"
+
+    - name: Validate Cortex Code inputs
+      if: ${{ inputs.cortex-code == 'true' }}
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.cortex-channel }}
+        VERSION: ${{ inputs.cortex-version }}
+        CHANNEL_INPUT_NAME: cortex-channel
+        VERSION_INPUT_NAME: cortex-version
+      run: bash $GITHUB_ACTION_PATH/scripts/validate-cortex-inputs.sh
+
+    - name: Install Cortex Code CLI
+      if: ${{ inputs.cortex-code == 'true' }}
+      shell: bash
+      env:
+        CORTEX_CHANNEL: ${{ inputs.cortex-channel }}
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/install-cortex.sh
+
+    - name: Pin specific Cortex Code version
+      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-version != 'latest' }}
+      shell: bash
+      env:
+        CORTEX_VERSION: ${{ inputs.cortex-version }}
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/pin-cortex-version.sh
+
+    - name: Set up workload identity authentication (Cortex Code)
+      if: ${{ inputs.cortex-code == 'true' && inputs.use-oidc == 'true' }}
+      shell: bash
+      env:
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: bash $GITHUB_ACTION_PATH/scripts/oidc-token.sh
+
+    - name: Configure Cortex Code connection
+      if: ${{ inputs.cortex-code == 'true' }}
+      shell: bash
+      env:
+        CONNECTION_NAME: ${{ inputs.connection-name }}
+        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+      run: python3 $GITHUB_ACTION_PATH/cortex-code/scripts/setup-connection.py
+
+    - name: Output Cortex Code version
+      id: cortex-version
+      if: ${{ inputs.cortex-code == 'true' }}
+      shell: bash
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/output-cortex-version.sh
+
+    - name: Run Cortex Code prompt
+      if: ${{ inputs.cortex-code == 'true' && (inputs.cortex-prompt != '' || inputs.cortex-prompt-file != '') }}
+      shell: bash
+      env:
+        CORTEX_PROMPT: ${{ inputs.cortex-prompt }}
+        CORTEX_PROMPT_FILE: ${{ inputs.cortex-prompt-file }}
+        CONNECTION_NAME: ${{ inputs.connection-name }}
+        CORTEX_PROMPT_ARGS: ${{ inputs.cortex-prompt-args }}
+      run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/run-prompt.sh
