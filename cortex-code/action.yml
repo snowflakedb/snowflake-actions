@@ -32,12 +32,17 @@ inputs:
     default: "SNOWFLAKE_TOKEN"
 
   prompt:
-    description: "Optional Cortex Code prompt to run after setup. Either an inline prompt string or a path to a file containing the prompt (auto-detected: treated as a file when a file exists at that path). Leave empty to install and configure only."
+    description: "Optional inline Cortex Code prompt string to run after setup. Mutually exclusive with prompt-file. Leave both empty to install and configure only."
+    required: false
+    default: ""
+
+  prompt-file:
+    description: "Optional path to a file containing the Cortex Code prompt to run after setup. Mutually exclusive with prompt."
     required: false
     default: ""
 
   prompt-args:
-    description: "Extra arguments appended to `cortex exec` when running `prompt` (e.g. '--max-turns 4 --output-format stream-json'). Space-separated; quoted arguments containing spaces are not supported."
+    description: "Extra arguments appended to `cortex exec` when running `prompt`/`prompt-file` (e.g. '--max-turns 4 --output-format stream-json'). Space-separated; quoted arguments containing spaces are not supported."
     required: false
     default: ""
 
@@ -96,10 +101,11 @@ runs:
       run: bash $GITHUB_ACTION_PATH/scripts/output-cortex-version.sh
 
     - name: Run prompt
-      if: ${{ inputs.prompt != '' }}
+      if: ${{ inputs.prompt != '' || inputs.prompt-file != '' }}
       shell: bash
       env:
         CORTEX_PROMPT: ${{ inputs.prompt }}
+        CORTEX_PROMPT_FILE: ${{ inputs.prompt-file }}
         CONNECTION_NAME: ${{ inputs.connection-name }}
         CORTEX_PROMPT_ARGS: ${{ inputs.prompt-args }}
       run: bash $GITHUB_ACTION_PATH/scripts/run-prompt.sh

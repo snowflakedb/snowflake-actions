@@ -48,12 +48,17 @@ inputs:
     default: "default"
 
   cortex-prompt:
-    description: "Optional Cortex Code prompt to run after setup (only when cortex-code: true). Either an inline prompt string or a path to a file containing the prompt (auto-detected). Leave empty to install and configure only."
+    description: "Optional inline Cortex Code prompt string to run after setup (only when cortex-code: true). Mutually exclusive with cortex-prompt-file. Leave both empty to install and configure only."
+    required: false
+    default: ""
+
+  cortex-prompt-file:
+    description: "Optional path to a file containing the Cortex Code prompt to run after setup (only when cortex-code: true). Mutually exclusive with cortex-prompt."
     required: false
     default: ""
 
   cortex-prompt-args:
-    description: "Extra arguments appended to `cortex exec` when running cortex-prompt (e.g. '--max-turns 4 --output-format stream-json'). Space-separated; quoted arguments containing spaces are not supported."
+    description: "Extra arguments appended to `cortex exec` when running cortex-prompt/cortex-prompt-file (e.g. '--max-turns 4 --output-format stream-json'). Space-separated; quoted arguments containing spaces are not supported."
     required: false
     default: ""
 
@@ -184,10 +189,11 @@ runs:
       run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/output-cortex-version.sh
 
     - name: Run Cortex Code prompt
-      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-prompt != '' }}
+      if: ${{ inputs.cortex-code == 'true' && (inputs.cortex-prompt != '' || inputs.cortex-prompt-file != '') }}
       shell: bash
       env:
         CORTEX_PROMPT: ${{ inputs.cortex-prompt }}
+        CORTEX_PROMPT_FILE: ${{ inputs.cortex-prompt-file }}
         CONNECTION_NAME: ${{ inputs.connection-name }}
         CORTEX_PROMPT_ARGS: ${{ inputs.cortex-prompt-args }}
       run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/run-prompt.sh

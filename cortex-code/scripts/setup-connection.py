@@ -38,7 +38,10 @@ def write_toml_value(f, key: str, value: str) -> None:
 
 def main() -> None:
     conn_name = os.environ.get("CONNECTION_NAME", "default")
-    token_var = os.environ.get("OIDC_TOKEN_NAME", "SNOWFLAKE_TOKEN")
+    # Uppercase to match oidc-token.sh, which mints the token into the
+    # uppercased env-var name. Keep these two in sync or a lowercase
+    # oidc-token-name silently skips connection setup even when OIDC succeeded.
+    token_var = os.environ.get("OIDC_TOKEN_NAME", "SNOWFLAKE_TOKEN").upper()
     conn_file = Path.home() / ".snowflake" / "connections.toml"
 
     # Validate connection name (prevent TOML injection)

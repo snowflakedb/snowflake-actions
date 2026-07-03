@@ -392,6 +392,13 @@ jobs:
           chmod +x "$FAKE_BIN/cortex"
           echo "$FAKE_BIN" >> "$GITHUB_PATH"
 
+      - name: Seed connections.toml so the run-prompt preflight passes
+        shell: bash
+        run: |
+          set -e
+          mkdir -p "${HOME}/.snowflake"
+          printf '%s\n' '[default]' '[myconn]' > "${HOME}/.snowflake/connections.toml"
+
       - name: "Test: inline prompt -> positional arg + fixed CI flags"
         shell: bash
         env:
@@ -404,7 +411,7 @@ jobs:
             "$CORTEX_ARGS_FILE"
           echo "PASS: inline prompt"
 
-      - name: "Test: existing file path -> --file"
+      - name: "Test: prompt-file -> --file"
         shell: bash
         env:
           CORTEX_ARGS_FILE: ${{ runner.temp }}/args-file.txt
@@ -412,11 +419,11 @@ jobs:
           set -e
           PROMPT_FILE="${RUNNER_TEMP}/prompt.md"
           echo "do the thing" > "$PROMPT_FILE"
-          CORTEX_PROMPT="$PROMPT_FILE" bash cortex-code/scripts/run-prompt.sh
+          CORTEX_PROMPT_FILE="$PROMPT_FILE" bash cortex-code/scripts/run-prompt.sh
           cat "$CORTEX_ARGS_FILE"
           diff <(printf '%s\n' exec --file "$PROMPT_FILE" -c default --bypass --no-history) \
             "$CORTEX_ARGS_FILE"
-          echo "PASS: file prompt"
+          echo "PASS: prompt-file"
 
       - name: "Test: connection-name + prompt-args passthrough"
         shell: bash
@@ -432,17 +439,53 @@ jobs:
             "$CORTEX_ARGS_FILE"
           echo "PASS: connection + passthrough args"
 
-      - name: "Test: empty prompt errors"
+      - name: "Test: neither prompt nor prompt-file errors"
         shell: bash
         run: |
           set -e
-          OUTPUT=$(CORTEX_PROMPT="" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
-            echo "FAIL: should have errored on empty prompt"
+          OUTPUT=$(CORTEX_PROMPT="" CORTEX_PROMPT_FILE="" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
+            echo "FAIL: should have errored when neither is set"
             exit 1
           }
           echo "$OUTPUT"
-          echo "$OUTPUT" | grep -q "empty prompt"
-          echo "PASS: empty prompt rejected"
+          echo "$OUTPUT" | grep -q "neither prompt nor prompt-file"
+          echo "PASS: neither prompt nor prompt-file rejected"
+
+      - name: "Test: both prompt and prompt-file errors"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CORTEX_PROMPT="hi" CORTEX_PROMPT_FILE="${RUNNER_TEMP}/whatever.md" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
+            echo "FAIL: should have errored when both are set"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "only one of prompt / prompt-file"
+          echo "PASS: both prompt and prompt-file rejected"
+
+      - name: "Test: missing prompt-file errors"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CORTEX_PROMPT_FILE="${RUNNER_TEMP}/does-not-exist.md" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
+            echo "FAIL: should have errored on missing prompt-file"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "prompt-file not found"
+          echo "PASS: missing prompt-file rejected"
+
+      - name: "Test: prompt but connection not configured errors"
+        shell: bash
+        run: |
+          set -e
+          OUTPUT=$(CORTEX_PROMPT="hi" CONNECTION_NAME="ghost" bash cortex-code/scripts/run-prompt.sh 2>&1) && {
+            echo "FAIL: should have errored when connection is missing"
+            exit 1
+          }
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "is not configured"
+          echo "PASS: missing connection rejected"
 
       - name: "Test: non-zero cortex exit fails the step"
         shell: bash
