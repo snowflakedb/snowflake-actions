@@ -25,9 +25,14 @@ set -euo pipefail
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
 AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
 
-# Reuse a token a parent step already minted (avoids a redundant request when
-# the snow-install path and the Cortex Code path both run with use-oidc).
+# Reuse a token that's already in the env rather than minting again. This covers
+# the intended case (the snow-install and Cortex Code paths both run with
+# use-oidc, so one mints and the other reuses) and also a caller who set the
+# token themselves — we can't tell them apart, and reusing is correct for both.
+# Mask it regardless of source so a caller-supplied token is scrubbed from logs
+# too, matching the mint path below.
 if [ -n "${!TOKEN_NAME_UPPER:-}" ]; then
+    echo "::add-mask::${!TOKEN_NAME_UPPER}"
     echo "OIDC token already present in \$${TOKEN_NAME_UPPER}; reusing it."
     exit 0
 fi
@@ -39,7 +44,10 @@ fi
 
 response=$(curl -sS --fail \
     -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}")
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}") || {
+    echo "::error::Could not reach the GitHub OIDC endpoint to mint a token. Confirm the job has 'permissions: id-token: write' and that GitHub Actions OIDC is reachable."
+    exit 1
+}
 
 # Parse the JSON {"value": "<jwt>"} with the stdlib. Prefer python3, falling
 # back to python (Windows runners expose the interpreter as `python`).
@@ -48,7 +56,7 @@ if [ -z "$PYTHON" ]; then
     echo "::error::No python interpreter (python3 or python) found to parse the OIDC token."
     exit 1
 fi
-token=$(echo "$response" | "$PYTHON" -c 'import sys, json; print(json.load(sys.stdin)["value"])')
+token=$(printf '%s' "$response" | "$PYTHON" -c 'import sys, json; print(json.load(sys.stdin)["value"])')
 
 if [ -z "$token" ]; then
     echo "::error::Failed to obtain an OIDC token from GitHub."

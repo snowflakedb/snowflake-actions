@@ -15,6 +15,12 @@
 
 set -euo pipefail
 
+# Match the install location used by install-snowflake-cli.sh (uv drops `snow`
+# into ~/.local/bin) so detection finds an existing install even on runners that
+# don't already have it on PATH — otherwise the no-op below would miss it and
+# reinstall on every run. Keep this in sync with output-snowflake-cli-version.sh.
+export PATH="${HOME}/.local/bin:$PATH"
+
 if command -v snow &>/dev/null; then
     echo "Snowflake CLI already available: $(snow --version 2>/dev/null | head -1). Reusing it."
     exit 0
