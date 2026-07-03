@@ -67,13 +67,14 @@ To also install Cortex Code, set `cortex-code: true` — see the [Cortex Code CL
 | `cortex-channel` | `stable` | Cortex Code install channel: `stable` or `beta`. |
 | `cortex-version` | `latest` | Cortex Code version to install (e.g. `1.5.2`). |
 | `connection-name` | `default` | Connection name written to `connections.toml` for Cortex Code. |
-| `cortex-prompt` | none | Optional prompt to run after Cortex Code setup — inline string or path to a prompt file (auto-detected). Applies only when `cortex-code: true`. |
-| `cortex-prompt-args` | none | Extra args appended to `cortex exec` when running `cortex-prompt` (e.g. `--max-turns 4 --output-format stream-json`). Space-separated. |
+| `cortex-prompt` | none | Optional **inline** prompt string to run after Cortex Code setup. Mutually exclusive with `cortex-prompt-file`. Applies only when `cortex-code: true`. |
+| `cortex-prompt-file` | none | Optional path to a **file** containing the prompt to run after Cortex Code setup. Mutually exclusive with `cortex-prompt`. Applies only when `cortex-code: true`. |
+| `cortex-prompt-args` | none | Extra args appended to `cortex exec` when running `cortex-prompt`/`cortex-prompt-file` (e.g. `--max-turns 4 --output-format stream-json`). Space-separated. |
 
 - `cli-version` and `custom-github-ref` are mutually exclusive.
 - `use-oidc` needs Snowflake CLI `3.11+` and `id-token: write`.
 - `default-config-file-path` is skipped if the file is absent.
-- `cortex-*` and `connection-name` apply only when `cortex-code: true`. **The standalone [`cortex-code`](cortex-code/README.md) action names these `cli-channel` / `cli-version` / `prompt` / `prompt-args`** — unknown `with:` keys are silently ignored by GitHub Actions, so use the right name for your entry point.
+- `cortex-*` and `connection-name` apply only when `cortex-code: true`. **The standalone [`cortex-code`](cortex-code/README.md) action names these `cli-channel` / `cli-version` / `prompt` / `prompt-file` / `prompt-args`** — unknown `with:` keys are silently ignored by GitHub Actions, so use the right name for your entry point.
 - `cortex-code: true` is supported on Linux runners only (the Cortex Code CLI is Linux-only), even though the Snowflake CLI itself runs on Linux, macOS, and Windows.
 
 ## Outputs

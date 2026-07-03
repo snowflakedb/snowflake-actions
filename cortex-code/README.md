@@ -50,7 +50,7 @@ permissions:
 2. Pins a specific version when `cli-version` is anything other than `latest`.
 3. With `use-oidc: true`, mints a GitHub OIDC token (no Snowflake CLI needed). If a prior step already exported the token, it's reused.
 4. Writes `connections.toml` (account, user, and workload-identity settings) so `cortex -c <name>` resolves. The OIDC token itself is read from the `SNOWFLAKE_TOKEN` environment variable at run time, not persisted to the file. If a connection with that name already exists, it skips (no overwrite).
-5. If `prompt` is set, runs it with `cortex exec ... -c <connection-name> --bypass --no-history` (plus any `prompt-args`). The value is run as `--file <path>` when a file exists at that path, otherwise as an inline prompt string. A non-zero exit from `cortex` fails the step.
+5. If `prompt` or `prompt-file` is set, runs it with `cortex exec ... -c <connection-name> --bypass --no-history` (plus any `prompt-args`). `prompt` is sent as an inline string; `prompt-file` is sent as `--file <path>`. Setting both is an error. If the target connection isn't configured, the step fails early with a clear message rather than deep inside `cortex`. A non-zero exit from `cortex` fails the step.
 
 See [Authentication (OIDC)](../README.md#authentication-oidc) in the root docs for how to set up the Snowflake service user.
 
@@ -63,8 +63,9 @@ See [Authentication (OIDC)](../README.md#authentication-oidc) in the root docs f
 | `use-oidc` | `false` | Mint a GitHub OIDC token and write a workload-identity connection. Needs `id-token: write`. Leave `false` if a parent step already set the token. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name holding the OIDC token. Must match the token env var set by `use-oidc` (or by a parent action). |
-| `prompt` | none | Optional prompt to run after setup. An **inline string** or a **path to a file** — treated as a file when one exists at that path, otherwise as literal prompt text. Leave empty to install and configure only. |
-| `prompt-args` | none | Extra arguments appended to `cortex exec` when running `prompt` (e.g. `--max-turns 4 --output-format stream-json`). Space-separated; quoted arguments containing spaces are not supported. |
+| `prompt` | none | Optional **inline** prompt string to run after setup. Mutually exclusive with `prompt-file`. Leave both empty to install and configure only. |
+| `prompt-file` | none | Optional path to a **file** containing the prompt to run after setup. Mutually exclusive with `prompt`. |
+| `prompt-args` | none | Extra arguments appended to `cortex exec` when running `prompt`/`prompt-file` (e.g. `--max-turns 4 --output-format stream-json`). Space-separated; quoted arguments containing spaces are not supported. |
 
 > When installed via the [root action](../README.md), these inputs are named `cortex-channel` / `cortex-version` (to disambiguate from the Snowflake CLI's own `cli-version`).
 
@@ -96,12 +97,12 @@ jobs:
         with:
           cli-channel: beta
           use-oidc: true
-          # Inline string or a path to a prompt file — auto-detected.
-          prompt: .cortex/prompts/scan.md
+          # Use prompt-file for a file, or prompt: "..." for an inline string.
+          prompt-file: .cortex/prompts/scan.md
           prompt-args: "--max-turns 4"
 ```
 
-Omit `prompt` to install and configure only, then invoke `cortex` yourself in a later step:
+Omit `prompt`/`prompt-file` to install and configure only, then invoke `cortex` yourself in a later step:
 
 ```yaml
       - uses: snowflakedb/snowflake-actions/cortex-code@v3
