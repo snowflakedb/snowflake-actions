@@ -26,7 +26,7 @@ For complete, ready-to-use workflow examples that compose these actions, see the
 
 ## Authentication
 
-All actions authenticate to Snowflake using the [`snowflakedb/snowflake-cli-action@v2.0`](https://github.com/snowflakedb/snowflake-cli-action) with **OIDC** (OpenID Connect) enabled. Each action calls this internally — you do not need to add a separate authentication step in your workflow.
+All actions authenticate to Snowflake using the [`snowflakedb/snowflake-cli-action@v2.0.2`](https://github.com/snowflakedb/snowflake-cli-action) with **OIDC** (OpenID Connect) enabled. Each action calls this internally — you do not need to add a separate authentication step in your workflow.
 
 **OIDC is the recommended approach.** It uses GitHub's built-in identity tokens via Workload Identity Federation so no passwords or private keys need to be stored as secrets. To use OIDC:
 
@@ -170,7 +170,7 @@ Tests the Snowflake connection for a target, validates that the connection role 
 
 ## dcm-plan
 
-Runs `snow dcm plan` against a target, writes a changeset summary (CREATE / ALTER / DROP counts by object domain) to the GitHub Step Summary, and uploads the plan output as an artifact.
+Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step Summary, and uploads the plan result as an artifact.
 
 ```yaml
 - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
@@ -197,9 +197,6 @@ Runs `snow dcm plan` against a target, writes a changeset summary (CREATE / ALTE
 |--------|-------------|
 | `result` | `success` or `failure` |
 | `plan-file` | Path to `plan_result.json` |
-| `create-count` | Number of CREATE operations |
-| `alter-count` | Number of ALTER operations |
-| `drop-count` | Number of DROP operations |
 
 ---
 
