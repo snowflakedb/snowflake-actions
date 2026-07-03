@@ -1,7 +1,6 @@
 # Snowflake DCM Deploy Action
 #
-# Runs `snow dcm deploy` against a target with optional drop detection,
-# dynamic table refresh, and data quality testing.
+# Runs `snow dcm deploy` against a target with optional drop detection.
 #
 # Prerequisites:
 #   The calling workflow MUST set these permissions:
@@ -31,7 +30,7 @@
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
 #             snowflake-user: ${{ env.SNOWFLAKE_USER }}
 #
-# Example usage (full pipeline with testing):
+# Example usage (with drop detection and PR comment):
 #
 #   - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
 #     with:
@@ -39,7 +38,6 @@
 #       project-path: Quickstarts/DCM_Project_Quickstart_1/
 #       snowflake-user: ${{ env.SNOWFLAKE_USER }}
 #       allow-drops: "false"
-#       test-expectations: "true"
 #       comment-on-pr: "true"
 #
 #   The deployment alias is set automatically to the source branch of the
@@ -55,7 +53,7 @@
 #       pull-requests: write
 
 name: "Snowflake DCM Deploy"
-description: "Deploy a DCM project to a target with optional drop detection, DT refresh, and expectation testing."
+description: "Deploy a DCM project to a target with optional drop detection."
 branding:
   icon: "upload-cloud"
   color: "blue"
@@ -74,16 +72,12 @@ inputs:
     description: "Allow DROP of DATABASE, SCHEMA, TABLE, or STAGE. Set to 'true' to skip drop detection."
     required: false
     default: "false"
-  test-expectations:
-    description: "Refresh all dynamic tables and then run snow dcm test after deploy"
-    required: false
-    default: "false"
   comment-on-pr:
     description: "Post a deploy summary comment on the associated pull request"
     required: false
     default: "false"
   post-scripts-path:
-    description: "Relative path (from project-path) to a directory of .sql files to run after deploy, before refresh/test. Files are executed alphabetically with Jinja templating using manifest variables."
+    description: "Relative path (from project-path) to a directory of .sql files to run after deploy. Files are executed alphabetically with Jinja templating using manifest variables."
     required: false
     default: ""
 
@@ -91,9 +85,6 @@ outputs:
   deploy-result:
     description: "'success' or 'failure'"
     value: ${{ steps.deploy.outputs.result || 'failure' }}
-  test-result:
-    description: "'success', 'failure', or 'skipped'"
-    value: ${{ steps.test.outputs.result || 'skipped' }}
 
 runs:
   using: "composite"
@@ -256,55 +247,7 @@ runs:
           exit 1
         fi
 
-    - name: Refresh dynamic tables and test expectations
-      id: test
-      if: always() && steps.deploy.outputs.result == 'success' && steps.post_scripts.outcome != 'failure' && inputs.test-expectations == 'true'
-      shell: bash
-      working-directory: ${{ inputs.project-path }}
-      run: |
-        . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
-
-        TARGET="${{ inputs.target }}"
-
-        # --- Refresh dynamic tables ---
-        REFRESH_OUTPUT_FILE="/tmp/dcm-refresh-cli-output.txt"
-
-        snow dcm refresh --target "$TARGET" --save-output -x 2>&1 | tee "$REFRESH_OUTPUT_FILE"
-        EXIT_CODE="${PIPESTATUS[0]}"
-
-        if [ "$EXIT_CODE" -eq 0 ]; then
-          gha_emit_summary success "Dynamic Tables Refresh successful" "$REFRESH_OUTPUT_FILE"
-        else
-          gha_emit_summary failure "Dynamic Tables Refresh Failed" "$REFRESH_OUTPUT_FILE"
-          echo "result=failure" >> "$GITHUB_OUTPUT"
-          exit "$EXIT_CODE"
-        fi
-
-        # --- Test data quality expectations ---
-        TEST_FILE="out/test.json"
-        TEST_OUTPUT_FILE="/tmp/dcm-test-cli-output.txt"
-
-        snow dcm test --target "$TARGET" --save-output -x 2>&1 | tee "$TEST_OUTPUT_FILE"
-        EXIT_CODE="${PIPESTATUS[0]}"
-
-        if [ "$EXIT_CODE" -eq 0 ] && [ -f "$TEST_FILE" ]; then
-          VIOLATED=$(jq '[.expectations[] | select(.expectation_violated == true)] | length' "$TEST_FILE")
-
-          if [ "$VIOLATED" -eq 0 ]; then
-            echo "result=success" >> "$GITHUB_OUTPUT"
-            gha_emit_summary success "Data Quality Tests passed" "$TEST_OUTPUT_FILE"
-          else
-            echo "result=failure" >> "$GITHUB_OUTPUT"
-            gha_emit_summary failure "Data Quality — ${VIOLATED} expectation(s) violated" "$TEST_OUTPUT_FILE"
-            exit 1
-          fi
-        else
-          echo "result=failure" >> "$GITHUB_OUTPUT"
-          gha_emit_summary failure "Data Quality Test Failed" "$TEST_OUTPUT_FILE"
-          exit "$EXIT_CODE"
-        fi
-
-    - name: Write result artifacts
+    - name: Write result artifact
       if: always()
       shell: bash
       run: |
@@ -314,26 +257,12 @@ runs:
         DEPLOY_RESULT="${{ steps.deploy.outputs.result }}"
         dcm_write_result deploy "$TARGET" "${DEPLOY_RESULT:-failure}"
 
-        if [ "${{ inputs.test-expectations }}" = "true" ]; then
-          TEST_RESULT="${{ steps.test.outputs.result }}"
-          dcm_write_result test "$TARGET" "${TEST_RESULT:-skipped}"
-        else
-          dcm_write_result test "$TARGET" "skipped"
-        fi
-
     - name: Upload deploy result artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: dcm-deploy-${{ inputs.target }}
         path: /tmp/dcm-results/dcm-deploy-${{ inputs.target }}.txt
-
-    - name: Upload test result artifact
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: dcm-test-${{ inputs.target }}
-        path: /tmp/dcm-results/dcm-test-${{ inputs.target }}.txt
 
     - name: Comment on PR
       if: always() && inputs.comment-on-pr == 'true'

@@ -22,7 +22,7 @@ For complete, ready-to-use workflow examples that compose these actions, see the
 | [`dcm-parse-manifest`](#dcm-parse-manifest) | Parse `manifest.yml` and output target names as a JSON array for matrix strategies |
 | [`dcm-connection-test`](#dcm-connection-test) | Test Snowflake connectivity, validate role match, check project status |
 | [`dcm-plan`](#dcm-plan) | Run `snow dcm plan`, summarize the changeset, upload artifacts |
-| [`dcm-deploy`](#dcm-deploy) | Deploy with optional drop detection, DT refresh, and expectation testing |
+| [`dcm-deploy`](#dcm-deploy) | Deploy with optional drop detection |
 
 ## Authentication
 
@@ -205,7 +205,7 @@ Runs `snow dcm plan` against a target, writes a changeset summary (CREATE / ALTE
 
 ## dcm-deploy
 
-Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying and can run dynamic table refresh + data quality expectation tests after deployment.
+Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying.
 
 The `dcm-plan` action **must** run before this action in the same job -- it produces the `out/plan/plan_result.json` file used for drop detection.
 
@@ -218,7 +218,6 @@ The deployment alias passed to `snow dcm deploy --alias` is set automatically to
     project-path: my-dcm-project/
     snowflake-user: ${{ env.SNOWFLAKE_USER }}
     allow-drops: "false"
-    test-expectations: "true"
     comment-on-pr: "true"
 ```
 
@@ -230,16 +229,14 @@ The deployment alias passed to `snow dcm deploy --alias` is set automatically to
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `allow-drops` | no | `false` | Set to `true` to skip destructive drop detection |
-| `test-expectations` | no | `false` | Refresh dynamic tables and run `snow dcm test` after deploy |
 | `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR |
-| `post-scripts-path` | no | `""` | Relative path (from project-path) to a directory of `.sql` files to run after deploy, before refresh/test. Files are executed alphabetically with Jinja templating using manifest variables. |
+| `post-scripts-path` | no | `""` | Relative path (from project-path) to a directory of `.sql` files to run after deploy. Files are executed alphabetically with Jinja templating using manifest variables. |
 
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
 | `deploy-result` | `success` or `failure` |
-| `test-result` | `success`, `failure`, or `skipped` |
 
 ---
 
@@ -289,7 +286,6 @@ jobs:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
-          test-expectations: "true"
           comment-on-pr: "true"
 
   # ---- PROD ----
@@ -316,7 +312,6 @@ jobs:
           target: DCM_PROD_US
           project-path: ${{ env.DCM_PROJECT_PATH }}
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
-          test-expectations: "true"
           comment-on-pr: "true"
 ```
 
