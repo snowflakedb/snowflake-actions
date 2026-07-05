@@ -47,6 +47,51 @@ dcm_read_manifest() {
   } >> "$GITHUB_OUTPUT"
 }
 
+# Render a color-coded summary of the plan changeset from plan_result.json.
+# Colored emoji dots are used because GitHub sanitizes HTML/CSS in PR comments,
+# so font coloring does not survive — emoji is the only reliably visible option.
+#
+#   🟩 CREATE    🟨 ALTER    🟥 DROP    ⬜ other
+#
+# Usage: dcm_render_plan_changeset <plan_result.json>
+dcm_render_plan_changeset() {
+  local plan_file="$1"
+
+  if [ ! -f "$plan_file" ]; then
+    return 0
+  fi
+
+  local total
+  total=$(jq '.changeset | length' "$plan_file" 2>/dev/null || echo 0)
+
+  gha_summary_line "#### 📋 Planned operations (${total:-0})"
+  gha_summary_line ""
+
+  if [ -z "$total" ] || [ "$total" -eq 0 ]; then
+    gha_summary_line "No changes detected in the plan."
+    gha_summary_line ""
+    return 0
+  fi
+
+  gha_summary_line "Legend: 🟩 CREATE &nbsp; 🟨 ALTER &nbsp; 🟥 DROP"
+  gha_summary_line ""
+
+  while IFS= read -r line; do
+    gha_summary_line "$line"
+  done < <(jq -r '
+    .changeset[]
+    | (
+        if   .type == "CREATE" then "🟩"
+        elif .type == "ALTER"  then "🟨"
+        elif .type == "DROP"   then "🟥"
+        else "⬜" end
+      ) as $dot
+    | "- \($dot) **\(.type)** \(.object_id.domain // "") `\(.object_id.fqn // "")`"
+  ' "$plan_file")
+
+  gha_summary_line ""
+}
+
 # Persist a DCM step result to the shared results directory for later aggregation.
 # Usage: dcm_write_result <kind> <target> <result>
 dcm_write_result() {

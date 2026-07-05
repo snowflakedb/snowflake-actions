@@ -95,7 +95,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.project-path }}
       run: |
-        . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
 
         TARGET="${{ inputs.target }}"
         export GHA_SUMMARY_FILE="/tmp/dcm-plan-summary.md"
@@ -121,6 +121,7 @@ runs:
         if [ "$PLAN_EXIT" -eq 0 ]; then
           echo "result=success" >> "$GITHUB_OUTPUT"
           gha_emit_summary success "DCM Plan to ${TARGET} successful" "$PLAN_OUTPUT_FILE"
+          dcm_render_plan_changeset "out/plan/plan_result.json"
         else
           echo "result=failure" >> "$GITHUB_OUTPUT"
           gha_emit_summary failure "DCM Plan to ${TARGET} failed" "$PLAN_OUTPUT_FILE"

@@ -172,6 +172,8 @@ Tests the Snowflake connection for a target, validates that the connection role 
 
 Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step Summary, and uploads the plan result as an artifact.
 
+The summary (and PR comment, when enabled) includes a color-coded list of the planned operations parsed from `plan_result.json`, using colored squares so the change type is clearly visible in the PR comment expander: 🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`.
+
 ```yaml
 - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
   with:
