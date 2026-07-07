@@ -1,5 +1,7 @@
 # Snowflake DCM Test Connection Action
 #
+# Preview — Available to all accounts.
+#
 # Tests the Snowflake connection for a DCM target, validates that the
 # connection role matches the manifest project_owner, and checks if the
 # DCM project already exists.
@@ -24,10 +26,11 @@
 #         contents: read
 #       steps:
 #         - uses: actions/checkout@v4
-#         - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
+#         - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
 #           with:
 #             target: DCM_STAGE
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
+#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
 
 name: "Snowflake DCM Test Connection"
 description: "Test Snowflake connection for a DCM target, validate role match, and check project status."
@@ -64,7 +67,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Snowflake CLI
-      uses: snowflakedb/snowflake-cli-action@v2.0.2
+      uses: snowflakedb/snowflake-cli-action@v2
       with:
         use-oidc: true
 

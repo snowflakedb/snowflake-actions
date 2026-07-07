@@ -1,5 +1,7 @@
 # Snowflake DCM Deploy Action
 #
+# Preview — Available to all accounts.
+#
 # Runs `snow dcm deploy` against a target with optional drop detection.
 #
 # Prerequisites:
@@ -24,7 +26,7 @@
 #         contents: read
 #       steps:
 #         - uses: actions/checkout@v4
-#         - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+#         - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
 #           with:
 #             target: DCM_STAGE
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
@@ -32,7 +34,7 @@
 #
 # Example usage (with drop detection and PR comment):
 #
-#   - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+#   - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
 #     with:
 #       target: DCM_STAGE
 #       project-path: Quickstarts/DCM_Project_Quickstart_1/
@@ -90,7 +92,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Snowflake CLI
-      uses: snowflakedb/snowflake-cli-action@v2.0.2
+      uses: snowflakedb/snowflake-cli-action@v2
       with:
         use-oidc: true
         custom-github-ref: "dcm-early-access"

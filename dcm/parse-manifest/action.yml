@@ -1,5 +1,7 @@
 # Snowflake DCM Parse Manifest Action
 #
+# Preview — Available to all accounts.
+#
 # Reads a DCM manifest.yml and outputs the list of target names as a
 # JSON array, ready to feed into a matrix strategy.
 #
@@ -12,7 +14,7 @@
 #         targets: ${{ steps.manifest.outputs.targets }}
 #       steps:
 #         - uses: actions/checkout@v4
-#         - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-parse-manifest@v1
+#         - uses: snowflakedb/snowflake-actions/dcm/parse-manifest@v3
 #           id: manifest
 #           with:
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
