@@ -1,19 +1,14 @@
 # Snowflake DCM GitHub Actions
 
-> ⚠️ These actions are provided as-is for evaluation purposes.
-> They are not officially supported by Snowflake.
-> Breaking changes may occur at any time.
-> Use at your own risk.
+> **Preview — Available to all accounts.** These actions are in Preview. Features and interfaces may change before general availability.
 
-A set of **reusable composite GitHub Actions** for automating [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) pipelines. Each action handles one step of the lifecycle, and you can reference them from your own workflows to build end-to-end CI/CD pipelines.
+A set of **reusable composite GitHub Actions** for automating [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) pipelines. Each action handles one step of the lifecycle, and you can compose them in your own workflows to build end-to-end CI/CD pipelines.
 
 To use an action in your workflow, reference it with:
 
 ```yaml
-- uses: Snowflake-Labs/snowflake_dcm_projects/actions/<action-name>@v1
+- uses: snowflakedb/snowflake-actions/dcm/<action-name>@v3
 ```
-
-For complete, ready-to-use workflow examples that compose these actions, see the [Sample Workflows](../GitHub_workflows/README.md).
 
 ## Actions
 
@@ -26,9 +21,9 @@ For complete, ready-to-use workflow examples that compose these actions, see the
 
 ## Authentication
 
-All actions authenticate to Snowflake using the [`snowflakedb/snowflake-cli-action@v2.0.2`](https://github.com/snowflakedb/snowflake-cli-action) with **OIDC** (OpenID Connect) enabled. Each action calls this internally — you do not need to add a separate authentication step in your workflow.
+All actions authenticate to Snowflake using OIDC (OpenID Connect) via [`snowflakedb/snowflake-cli-action`](https://github.com/snowflakedb/snowflake-cli-action). Each action handles this internally — you do not need a separate authentication step in your workflow. OIDC uses GitHub's built-in identity tokens so no passwords or private keys are stored as secrets.
 
-**OIDC is the recommended approach.** It uses GitHub's built-in identity tokens via Workload Identity Federation so no passwords or private keys need to be stored as secrets. To use OIDC:
+To set up OIDC:
 
 1. Create a Snowflake service user with OIDC workload identity. The `SUBJECT` must match exactly what GitHub sends — case-sensitive, no wildcards. Since these actions use GitHub Environments, use the environment-based subject format:
 
@@ -55,11 +50,6 @@ All actions authenticate to Snowflake using the [`snowflakedb/snowflake-cli-acti
 3. Create a GitHub Environment for each DCM target (e.g. `DCM_STAGE`, `DCM_PROD_US`) — the environment name must match the `SUBJECT` claim
 4. Set `SNOWFLAKE_USER` in the workflow `env` block to the service user name
 5. Grant the workflow `id-token: write` and `contents: read` permissions (see [Prerequisites](#prerequisites) for the full block)
-
-**PAT and key-pair authentication** are also supported. If you cannot use OIDC, set the appropriate environment variables in your workflow before calling the actions:
-
-- **PAT / Password:** Set `SNOWFLAKE_PASSWORD` in your workflow `env` block (sourced from a secret)
-- **Key-pair:** Set `SNOWFLAKE_PRIVATE_KEY_RAW` and `SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT` in your workflow `env` block
 
 ## Prerequisites
 
@@ -90,7 +80,7 @@ permissions:
 Reads a DCM `manifest.yml` and outputs the list of target names as a JSON array, ready to feed into a GitHub Actions matrix strategy. This is useful for dynamically running jobs across all targets without hardcoding them.
 
 ```yaml
-- uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-parse-manifest@v1
+- uses: snowflakedb/snowflake-actions/dcm/parse-manifest@v3
   id: manifest
   with:
     project-path: my-dcm-project/
@@ -118,7 +108,7 @@ jobs:
       targets: ${{ steps.manifest.outputs.targets }}
     steps:
       - uses: actions/checkout@v4
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-parse-manifest@v1
+      - uses: snowflakedb/snowflake-actions/dcm/parse-manifest@v3
         id: manifest
         with:
           project-path: my-dcm-project/
@@ -142,7 +132,7 @@ jobs:
 Tests the Snowflake connection for a target, validates that the connection role matches the manifest `project_owner`, and checks whether the DCM project already exists.
 
 ```yaml
-- uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
+- uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
@@ -175,7 +165,7 @@ Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step
 The summary (and PR comment, when enabled) includes a color-coded list of the planned operations parsed from `plan_result.json`, using colored squares so the change type is clearly visible in the PR comment expander: 🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`.
 
 ```yaml
-- uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+- uses: snowflakedb/snowflake-actions/dcm/plan@v3
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
@@ -211,7 +201,7 @@ The `dcm-plan` action **must** run before this action in the same job -- it prod
 The deployment alias passed to `snow dcm deploy --alias` is set automatically to the source branch of the associated pull request (resolved from `pull_request` events directly, or via the merge commit on `push` events). When no PR branch can be found, no alias is passed.
 
 ```yaml
-- uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+- uses: snowflakedb/snowflake-actions/dcm/deploy@v3
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
@@ -267,20 +257,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-connection-test@v1
+      - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+      - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
@@ -299,14 +289,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-plan@v1
+      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:
           target: DCM_PROD_US
           project-path: ${{ env.DCM_PROJECT_PATH }}
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
-      - uses: Snowflake-Labs/snowflake_dcm_projects/actions/dcm-deploy@v1
+      - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
         with:
           target: DCM_PROD_US
           project-path: ${{ env.DCM_PROJECT_PATH }}
@@ -314,6 +304,3 @@ jobs:
           comment-on-pr: "true"
 ```
 
-## Sample Workflows
-
-The [`GitHub_workflows/`](../GitHub_workflows/) directory contains ready-to-use workflow files that demonstrate how these actions work together. You can copy them into your repository's `.github/workflows/` directory and customize them for your project. See the [Sample Workflows README](../GitHub_workflows/README.md) for setup instructions.
