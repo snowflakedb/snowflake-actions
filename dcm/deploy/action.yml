@@ -86,7 +86,7 @@ inputs:
 outputs:
   deploy-result:
     description: "'success' or 'failure'"
-    value: ${{ steps.deploy.outputs.result || 'failure' }}
+    value: ${{ steps.deploy.outputs.result == 'success' && (steps.post_scripts.outcome == 'success' || steps.post_scripts.outcome == 'skipped') && 'success' || 'failure' }}
 
 runs:
   using: "composite"
@@ -155,16 +155,19 @@ runs:
       id: deploy
       shell: bash
       working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        PR_BRANCH: ${{ steps.pr_branch.outputs.branch }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
 
-        TARGET="${{ inputs.target }}"
-
         ALIAS_ARG=()
-        PR_BRANCH="${{ steps.pr_branch.outputs.branch }}"
         if [ -n "$PR_BRANCH" ]; then
           SHORT_SHA="${GITHUB_SHA:0:7}"
-          ALIAS_ARG=(--alias "${PR_BRANCH}-${SHORT_SHA}")
+          # Snowflake identifiers only allow alphanumerics and underscores;
+          # replace every other character so e.g. feature/foo becomes feature_foo.
+          SAFE_BRANCH="${PR_BRANCH//[^a-zA-Z0-9]/_}"
+          ALIAS_ARG=(--alias "${SAFE_BRANCH}-${SHORT_SHA}")
         fi
 
         DEPLOY_OUTPUT_FILE="/tmp/dcm-deploy-cli-output.txt"
@@ -186,9 +189,10 @@ runs:
       if: always() && steps.deploy.outputs.result == 'success' && inputs.post-scripts-path != ''
       shell: bash
       working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SCRIPTS_DIR: ${{ inputs.post-scripts-path }}
       run: |
-        TARGET="${{ inputs.target }}"
-        SCRIPTS_DIR="${{ inputs.post-scripts-path }}"
         MANIFEST_PATH="manifest.yml"
 
         if [ ! -d "$SCRIPTS_DIR" ]; then
@@ -219,7 +223,8 @@ runs:
         # Run all .sql files alphabetically
         SCRIPT_COUNT=0
         FAIL_COUNT=0
-        for SQL_FILE in $(ls "$SCRIPTS_DIR"/*.sql 2>/dev/null | sort); do
+        for SQL_FILE in "$SCRIPTS_DIR"/*.sql; do
+          [ -e "$SQL_FILE" ] || continue
           SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
           FILENAME=$(basename "$SQL_FILE")
           echo "Running: $FILENAME"
@@ -252,11 +257,11 @@ runs:
     - name: Write result artifact
       if: always()
       shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        DEPLOY_RESULT: ${{ steps.deploy.outputs.result }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
-        TARGET="${{ inputs.target }}"
-
-        DEPLOY_RESULT="${{ steps.deploy.outputs.result }}"
         dcm_write_result deploy "$TARGET" "${DEPLOY_RESULT:-failure}"
 
     - name: Upload deploy result artifact
@@ -272,4 +277,4 @@ runs:
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
-          await postSummaryComment(github, context, '/tmp/dcm-deploy-summary.md', 'Could not read deploy summary.');
+          await postSummaryComment(github, context, '/tmp/dcm-deploy-summary.md', 'Could not read deploy summary.', 'dcm-deploy:${{ inputs.target }}');
