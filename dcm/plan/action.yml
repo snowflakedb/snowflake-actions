@@ -1,0 +1,166 @@
+# Snowflake DCM Plan Action
+#
+# Preview — Available to all accounts.
+#
+# Runs `snow dcm plan` against a target, summarizes the changeset in the
+# GitHub Step Summary, and uploads the plan output as an artifact.
+#
+# Prerequisites:
+#   The calling workflow MUST set these permissions:
+#
+#     permissions:
+#       id-token: write
+#       contents: read
+#
+#   The job MUST use a GitHub Environment whose name matches the target
+#   (so that OIDC tokens are scoped correctly).
+#
+# Example usage:
+#
+#   jobs:
+#     plan:
+#       runs-on: ubuntu-latest
+#       environment: DCM_STAGE
+#       permissions:
+#         id-token: write
+#         contents: read
+#       steps:
+#         - uses: actions/checkout@v4
+#         - uses: snowflakedb/snowflake-actions/dcm/plan@v3
+#           with:
+#             target: DCM_STAGE
+#             project-path: Quickstarts/DCM_Project_Quickstart_1/
+#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
+#             comment-on-pr: "true"
+#
+#   When comment-on-pr is enabled, the calling job also needs:
+#
+#     permissions:
+#       id-token: write
+#       contents: read
+#       pull-requests: write
+
+name: "Snowflake DCM Plan"
+description: "Run snow dcm plan against a target, summarize the changeset, and upload artifacts."
+branding:
+  icon: "database"
+  color: "blue"
+
+inputs:
+  target:
+    description: "DCM target name from manifest.yml (e.g. DCM_STAGE, DCM_PROD_US)"
+    required: true
+  project-path:
+    description: "Path to the DCM project directory (containing manifest.yml)"
+    required: true
+  snowflake-user:
+    description: "Snowflake username for OIDC authentication"
+    required: true
+  create-if-not-exists:
+    description: "Run snow dcm create --if-not-exists before planning"
+    required: false
+    default: "true"
+  comment-on-pr:
+    description: "Post the plan summary as a comment on the associated pull request"
+    required: false
+    default: "false"
+
+outputs:
+  result:
+    description: "'success' or 'failure'"
+    value: ${{ steps.plan.outputs.result }}
+  plan-file:
+    description: "Path to plan_result.json"
+    value: ${{ steps.plan.outputs.plan-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        custom-github-ref: "dcm-early-access"
+
+    - name: Set connection env vars
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SNOWFLAKE_USER: ${{ inputs.snowflake-user }}
+        PROJECT_PATH_RAW: ${{ inputs.project-path }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_read_manifest
+        # Normalize project-path: strip trailing slash so downstream steps can
+        # always append /... without risking foo//bar double-slash paths.
+        echo "PROJECT_PATH=${PROJECT_PATH_RAW%/}" >> "$GITHUB_ENV"
+
+    - name: DCM Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        CREATE_IF_NOT_EXISTS: ${{ inputs.create-if-not-exists }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+
+        export GHA_SUMMARY_FILE="/tmp/dcm-plan-summary.md"
+        : > "$GHA_SUMMARY_FILE"
+
+        # Optionally create the project if it doesn't exist
+        if [ "$CREATE_IF_NOT_EXISTS" = "true" ]; then
+          if ! snow dcm create --target "$TARGET" --if-not-exists -x; then
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            gha_summary_line "### ❌ DCM Create for ${TARGET} failed"
+            gha_summary_line "The \`snow dcm create --if-not-exists\` step failed. Plan was not attempted."
+            echo "plan-file=" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+        fi
+
+        PLAN_OUTPUT_FILE="/tmp/dcm-plan-cli-output.txt"
+
+        # Run the plan, capturing CLI output while preserving the exit code
+        snow dcm plan --target "$TARGET" --save-output -x 2>&1 | tee "$PLAN_OUTPUT_FILE"
+        PLAN_EXIT="${PIPESTATUS[0]}"
+
+        if [ "$PLAN_EXIT" -eq 0 ]; then
+          echo "result=success" >> "$GITHUB_OUTPUT"
+          dcm_emit_plan_summary success "DCM Plan to ${TARGET} successful" "$PLAN_OUTPUT_FILE"
+        else
+          echo "result=failure" >> "$GITHUB_OUTPUT"
+          dcm_emit_plan_summary failure "DCM Plan to ${TARGET} failed" "$PLAN_OUTPUT_FILE"
+          echo "plan-file=" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        echo "plan-file=${PROJECT_PATH%/}/out/plan/plan_result.json" >> "$GITHUB_OUTPUT"
+
+    - name: Write result artifact
+      if: always()
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        RESULT: ${{ steps.plan.outputs.result }}
+      run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_write_result plan "$TARGET" "${RESULT:-failure}"
+
+    - name: Upload plan artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dcm-plan-${{ inputs.target }}
+        path: |
+          ${{ env.PROJECT_PATH }}/out/plan/plan_result.json
+          /tmp/dcm-results/dcm-plan-${{ inputs.target }}.txt
+
+    - name: Comment on PR
+      if: always() && inputs.comment-on-pr == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}');
