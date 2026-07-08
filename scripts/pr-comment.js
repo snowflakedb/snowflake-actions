@@ -42,14 +42,19 @@ async function resolvePrBranch(github, context) {
 }
 
 // Post the contents of a summary file (plus a run link) as a PR comment.
-async function postSummaryComment(github, context, summaryFile, fallback) {
+// When marker is provided (e.g. 'dcm-plan:DCM_STAGE'), the comment is written
+// as <!-- marker --> so subsequent runs update the existing comment in place
+// rather than stacking duplicates on the PR.
+async function postSummaryComment(github, context, summaryFile, fallback, marker) {
   const prNumber = await resolvePrNumber(github, context);
   if (prNumber == null) {
     console.log('No PR found for this commit. Skipping comment.');
     return;
   }
 
-  let body = '';
+  const markerTag = marker ? `<!-- ${marker} -->` : null;
+
+  let body = markerTag ? `${markerTag}\n` : '';
   try {
     body += fs.readFileSync(summaryFile, 'utf8');
   } catch {
@@ -57,6 +62,24 @@ async function postSummaryComment(github, context, summaryFile, fallback) {
   }
   const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
   body += `\n[🔎 View Full Run Details](${runUrl})\n`;
+
+  if (markerTag) {
+    const { data: comments } = await github.rest.issues.listComments({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: prNumber,
+    });
+    const existing = comments.find(c => c.body && c.body.includes(markerTag));
+    if (existing) {
+      await github.rest.issues.updateComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        comment_id: existing.id,
+        body: body,
+      });
+      return;
+    }
+  }
 
   await github.rest.issues.createComment({
     owner: context.repo.owner,
