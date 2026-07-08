@@ -88,23 +88,29 @@ runs:
       env:
         TARGET: ${{ inputs.target }}
         SNOWFLAKE_USER: ${{ inputs.snowflake-user }}
+        PROJECT_PATH_RAW: ${{ inputs.project-path }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
         dcm_read_manifest
+        # Normalize project-path: strip trailing slash so downstream steps can
+        # always append /... without risking foo//bar double-slash paths.
+        echo "PROJECT_PATH=${PROJECT_PATH_RAW%/}" >> "$GITHUB_ENV"
 
     - name: DCM Plan
       id: plan
       shell: bash
       working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET: ${{ inputs.target }}
+        CREATE_IF_NOT_EXISTS: ${{ inputs.create-if-not-exists }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
 
-        TARGET="${{ inputs.target }}"
         export GHA_SUMMARY_FILE="/tmp/dcm-plan-summary.md"
         : > "$GHA_SUMMARY_FILE"
 
         # Optionally create the project if it doesn't exist
-        if [ "${{ inputs.create-if-not-exists }}" = "true" ]; then
+        if [ "$CREATE_IF_NOT_EXISTS" = "true" ]; then
           if ! snow dcm create --target "$TARGET" --if-not-exists -x; then
             echo "result=failure" >> "$GITHUB_OUTPUT"
             gha_summary_line "### ❌ DCM Create for ${TARGET} failed"
@@ -131,15 +137,17 @@ runs:
           exit 1
         fi
 
-        echo "plan-file=${{ inputs.project-path }}out/plan/plan_result.json" >> "$GITHUB_OUTPUT"
+        echo "plan-file=${PROJECT_PATH%/}/out/plan/plan_result.json" >> "$GITHUB_OUTPUT"
 
     - name: Write result artifact
       if: always()
       shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        RESULT: ${{ steps.plan.outputs.result }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
-        RESULT="${{ steps.plan.outputs.result }}"
-        dcm_write_result plan "${{ inputs.target }}" "${RESULT:-failure}"
+        dcm_write_result plan "$TARGET" "${RESULT:-failure}"
 
     - name: Upload plan artifact
       if: always()
@@ -147,7 +155,7 @@ runs:
       with:
         name: dcm-plan-${{ inputs.target }}
         path: |
-          ${{ inputs.project-path }}${{ endsWith(inputs.project-path, '/') && '' || '/' }}out/plan/plan_result.json
+          ${{ env.PROJECT_PATH }}/out/plan/plan_result.json
           /tmp/dcm-results/dcm-plan-${{ inputs.target }}.txt
 
     - name: Comment on PR
@@ -156,4 +164,4 @@ runs:
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
-          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.');
+          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}');
