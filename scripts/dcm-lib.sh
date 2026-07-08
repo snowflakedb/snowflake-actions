@@ -12,12 +12,12 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/gh-actions-lib.sh"
 
-# Read a scalar value from manifest.yml with surrounding quotes stripped.
+# Read a scalar value from manifest.yml.
 # Usage: dcm_manifest_value <yq-path> [manifest-path]
 dcm_manifest_value() {
   local path="$1"
   local manifest="${2:-manifest.yml}"
-  yq eval "$path" "$manifest" | sed 's/"//g' | sed "s/'//g"
+  yq eval "$path" "$manifest"
 }
 
 # Read the manifest target and export the Snowflake connection env vars.
@@ -34,11 +34,11 @@ dcm_read_manifest() {
   account=$(dcm_manifest_value ".targets.$TARGET.account_identifier" "$manifest")
   owner_role=$(dcm_manifest_value ".targets.$TARGET.project_owner" "$manifest")
 
-  {
-    echo "SNOWFLAKE_ACCOUNT=$account"
-    echo "SNOWFLAKE_ROLE=$owner_role"
-    echo "SNOWFLAKE_USER=$SNOWFLAKE_USER"
-  } >> "$GITHUB_ENV"
+  # Use GitHub's multiline-value syntax so a value containing a newline
+  # can't inject extra env vars.
+  printf 'SNOWFLAKE_ACCOUNT<<GH_EOF\n%s\nGH_EOF\n' "$account"   >> "$GITHUB_ENV"
+  printf 'SNOWFLAKE_ROLE<<GH_EOF\n%s\nGH_EOF\n'    "$owner_role" >> "$GITHUB_ENV"
+  printf 'SNOWFLAKE_USER<<GH_EOF\n%s\nGH_EOF\n'    "$SNOWFLAKE_USER" >> "$GITHUB_ENV"
 
   {
     echo "project-name=$project_name"
