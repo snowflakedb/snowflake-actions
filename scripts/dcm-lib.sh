@@ -47,49 +47,38 @@ dcm_read_manifest() {
   } >> "$GITHUB_OUTPUT"
 }
 
-# Render a color-coded summary of the plan changeset from plan_result.json.
-# Colored emoji dots are used because GitHub sanitizes HTML/CSS in PR comments,
-# so font coloring does not survive — emoji is the only reliably visible option.
+# Emit a DCM plan step summary with emoji injected inline into the CLI output.
+# Lines that start with CREATE/ALTER/DROP are prefixed with 🟩/🟨/🟥 so the
+# colour coding is part of the output tree rather than a separate section.
+# GitHub strips HTML/CSS in PR comments, so emoji is the only reliably visible
+# colouring option.
 #
-#   🟩 CREATE    🟨 ALTER    🟥 DROP    ⬜ other
-#
-# Usage: dcm_render_plan_changeset <plan_result.json>
-dcm_render_plan_changeset() {
-  local plan_file="$1"
+# Usage: dcm_emit_plan_summary <success|failure> <header> <output-file>
+dcm_emit_plan_summary() {
+  local status="$1"
+  local header="$2"
+  local output_file="$3"
 
-  if [ ! -f "$plan_file" ]; then
-    return 0
+  if [ "$status" = "success" ]; then
+    gha_summary_line "### ✅ ${header}"
+  else
+    gha_summary_line "### ❌ ${header}"
   fi
 
-  local total
-  total=$(jq '.changeset | length' "$plan_file" 2>/dev/null || echo 0)
-
-  gha_summary_line "#### 📋 Planned operations (${total:-0})"
-  gha_summary_line ""
-
-  if [ -z "$total" ] || [ "$total" -eq 0 ]; then
-    gha_summary_line "No changes detected in the plan."
-    gha_summary_line ""
-    return 0
+  gha_summary_line '```'
+  if [ -s "$output_file" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        CREATE\ *) gha_summary_line "🟩 $line" ;;
+        ALTER\ *)  gha_summary_line "🟨 $line" ;;
+        DROP\ *)   gha_summary_line "🟥 $line" ;;
+        *)         gha_summary_line "$line" ;;
+      esac
+    done < "$output_file"
+  else
+    gha_summary_line "No output captured. Check the Actions log for details."
   fi
-
-  gha_summary_line "Legend: 🟩 CREATE &nbsp; 🟨 ALTER &nbsp; 🟥 DROP"
-  gha_summary_line ""
-
-  while IFS= read -r line; do
-    gha_summary_line "$line"
-  done < <(jq -r '
-    .changeset[]
-    | (
-        if   .type == "CREATE" then "🟩"
-        elif .type == "ALTER"  then "🟨"
-        elif .type == "DROP"   then "🟥"
-        else "⬜" end
-      ) as $dot
-    | "- \($dot) **\(.type)** \(.object_id.domain // "") `\(.object_id.fqn // "")`"
-  ' "$plan_file")
-
-  gha_summary_line ""
+  gha_summary_line '```'
 }
 
 # Persist a DCM step result to the shared results directory for later aggregation.
