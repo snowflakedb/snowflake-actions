@@ -86,9 +86,10 @@ runs:
       id: test_connection
       shell: bash
       working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET_NAME: ${{ inputs.target }}
+        MANIFEST_ROLE: ${{ steps.read_manifest.outputs.manifest-role }}
       run: |
-        TARGET_NAME="${{ inputs.target }}"
-        MANIFEST_ROLE="${{ steps.read_manifest.outputs.manifest-role }}"
 
         CONNECTION_OUTPUT=$(snow connection test -x --format json 2>&1) && CONNECTION_RC=0 || CONNECTION_RC=$?
 
@@ -152,20 +153,21 @@ runs:
       id: validate_role
       if: always()
       shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        MANIFEST_ACCOUNT: ${{ steps.read_manifest.outputs.manifest-account }}
+        MANIFEST_ROLE: ${{ steps.read_manifest.outputs.manifest-role }}
+        PROJECT_NAME: ${{ steps.read_manifest.outputs.project-name }}
+        CONN_ACCOUNT: ${{ steps.test_connection.outputs.connection-account }}
+        CONN_USER: ${{ steps.test_connection.outputs.connection-user }}
+        CONN_ROLE: ${{ steps.test_connection.outputs.connection-role }}
+        CONN_ERROR: ${{ steps.test_connection.outputs.connection-error }}
+        CONN_OUTCOME: ${{ steps.test_connection.outcome }}
+        USER_HAS_ROLE: ${{ steps.test_connection.outputs.user-has-role }}
+        ROLE_IS_DEFAULT: ${{ steps.test_connection.outputs.role-is-default }}
+        PROJECT_EXISTS: ${{ steps.test_connection.outputs.project-exists }}
+        PROJECT_OWNER: ${{ steps.test_connection.outputs.project-owner }}
       run: |
-        MANIFEST_ACCOUNT="${{ steps.read_manifest.outputs.manifest-account }}"
-        MANIFEST_ROLE="${{ steps.read_manifest.outputs.manifest-role }}"
-        PROJECT_NAME="${{ steps.read_manifest.outputs.project-name }}"
-        CONN_ACCOUNT="${{ steps.test_connection.outputs.connection-account }}"
-        CONN_USER="${{ steps.test_connection.outputs.connection-user }}"
-        CONN_ROLE="${{ steps.test_connection.outputs.connection-role }}"
-        CONN_ERROR="${{ steps.test_connection.outputs.connection-error }}"
-        CONN_OUTCOME="${{ steps.test_connection.outcome }}"
-        USER_HAS_ROLE="${{ steps.test_connection.outputs.user-has-role }}"
-        ROLE_IS_DEFAULT="${{ steps.test_connection.outputs.role-is-default }}"
-        PROJECT_EXISTS="${{ steps.test_connection.outputs.project-exists }}"
-        PROJECT_OWNER="${{ steps.test_connection.outputs.project-owner }}"
-
         FAILED=false
 
         if [ "$CONN_OUTCOME" != "success" ]; then
@@ -224,7 +226,7 @@ runs:
         fi
 
         {
-          echo "### Target: \`${{ inputs.target }}\`"
+          echo "### Target: \`$TARGET\`"
           echo ""
           echo "| Property | Manifest | Connection | Validation |"
           echo "|----------|----------|------------|------------|"
@@ -273,11 +275,14 @@ runs:
       id: summary
       if: always()
       shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        TEST_CONNECTION_OUTCOME: ${{ steps.test_connection.outcome }}
+        VALIDATE_ROLE_OUTCOME: ${{ steps.validate_role.outcome }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
-        TARGET="${{ inputs.target }}"
-        if [ "${{ steps.test_connection.outcome }}" = "success" ] && \
-           [ "${{ steps.validate_role.outcome }}" = "success" ]; then
+        if [ "$TEST_CONNECTION_OUTCOME" = "success" ] && \
+           [ "$VALIDATE_ROLE_OUTCOME" = "success" ]; then
           echo "result=success" >> "$GITHUB_OUTPUT"
           RESULT="success"
         else
