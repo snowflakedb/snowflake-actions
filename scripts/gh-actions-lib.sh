@@ -13,9 +13,9 @@
 # Write one line to $GITHUB_STEP_SUMMARY and, when set, to $GHA_SUMMARY_FILE
 # (a copy the caller can later post as a PR comment).
 gha_summary_line() {
-  echo "$1" >> "$GITHUB_STEP_SUMMARY"
+  printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
   if [ -n "${GHA_SUMMARY_FILE:-}" ]; then
-    echo "$1" >> "$GHA_SUMMARY_FILE"
+    printf '%s\n' "$1" >> "$GHA_SUMMARY_FILE"
   fi
 }
 
