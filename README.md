@@ -231,6 +231,61 @@ On self-hosted runners that persist between jobs, add a cleanup step to remove c
   run: rm -f ~/.snowflake/connections.toml
 ```
 
+---
+
+## GitHub actions for DCM Projects
+
+> **Public Preview** — Features and interfaces may change before general availability.
+
+Four composite actions for automating [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) CI/CD pipelines. Each action handles one step of the lifecycle; compose them to build end-to-end workflows.
+
+| Action                                                     | Description                                                                                                                                                                      |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[dcm/parse-manifest](dcm/README.md#dcm-parse-manifest)`   | Parse `manifest.yml` and output target names as a JSON array for matrix strategies                                                                                               |
+| `[dcm/connection-test](dcm/README.md#dcm-connection-test)` | Test Snowflake connectivity, validate that the connection role matches the manifest `project_owner`, and check whether the project already exists                                |
+| `[dcm/plan](dcm/README.md#dcm-plan)`                       | Run `snow dcm plan`, write a color-coded changeset summary (🟩 CREATE 🟨 ALTER 🟥 DROP) to the Step Summary and optionally post it as a PR comment, and upload the plan artifact |
+| `[dcm/deploy](dcm/README.md#dcm-deploy)`                   | Run `snow dcm plan` then `snow dcm deploy` with optional drop detection and post-deploy SQL scripts; optionally post a deploy summary as a PR comment                            |
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: DCM_STAGE
+    env:
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
+        with:
+          target: DCM_STAGE
+          project-path: my-dcm-project/
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+
+      - uses: snowflakedb/snowflake-actions/dcm/plan@v3
+        with:
+          target: DCM_STAGE
+          project-path: my-dcm-project/
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          comment-on-pr: "true"
+
+      - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
+        with:
+          target: DCM_STAGE
+          project-path: my-dcm-project/
+          snowflake-user: ${{ env.SNOWFLAKE_USER }}
+          comment-on-pr: "true"
+```
+
+See the [DCM actions README](dcm/README.md) for full input/output references, authentication setup, and a complete multi-environment pipeline example.
+
+---
+
 ## Support
 
 Report issues or request features via [GitHub Issues](https://github.com/snowflakedb/snowflake-actions/issues).
