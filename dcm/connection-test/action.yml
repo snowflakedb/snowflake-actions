@@ -295,5 +295,5 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: dcm-connection-${{ inputs.target }}
+        name: dcm-connection-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: /tmp/dcm-results/dcm-connection-${{ inputs.target }}.txt
