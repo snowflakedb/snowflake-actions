@@ -152,7 +152,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: dcm-plan-${{ inputs.target }}
+        name: dcm-plan-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: |
           ${{ env.PROJECT_PATH }}/out/plan/plan_result.json
           /tmp/dcm-results/dcm-plan-${{ inputs.target }}.txt
@@ -163,4 +163,4 @@ runs:
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
-          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}');
+          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}:${{ env.DCM_PROJECT_SLUG }}');

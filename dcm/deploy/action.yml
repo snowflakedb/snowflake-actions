@@ -268,7 +268,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: dcm-deploy-${{ inputs.target }}
+        name: dcm-deploy-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: /tmp/dcm-results/dcm-deploy-${{ inputs.target }}.txt
 
     - name: Comment on PR
@@ -277,4 +277,4 @@ runs:
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
-          await postSummaryComment(github, context, '/tmp/dcm-deploy-summary.md', 'Could not read deploy summary.', 'dcm-deploy:${{ inputs.target }}');
+          await postSummaryComment(github, context, '/tmp/dcm-deploy-summary.md', 'Could not read deploy summary.', 'dcm-deploy:${{ inputs.target }}:${{ env.DCM_PROJECT_SLUG }}');

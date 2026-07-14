@@ -40,6 +40,15 @@ dcm_read_manifest() {
   printf 'SNOWFLAKE_ROLE<<GH_EOF\n%s\nGH_EOF\n'    "$owner_role" >> "$GITHUB_ENV"
   printf 'SNOWFLAKE_USER<<GH_EOF\n%s\nGH_EOF\n'    "$SNOWFLAKE_USER" >> "$GITHUB_ENV"
 
+  # Sanitized project name for use in artifact names. GitHub artifact names
+  # disallow / \ : * ? " < > |, so replace every character that is not
+  # alphanumeric, dot, underscore, or hyphen with an underscore. This keeps
+  # uploaded artifacts unique when the same target is planned/deployed for
+  # different projects in a single workflow run.
+  local project_slug
+  project_slug=$(printf '%s' "$project_name" | tr -c 'a-zA-Z0-9._-' '_')
+  printf 'DCM_PROJECT_SLUG<<GH_EOF\n%s\nGH_EOF\n' "$project_slug" >> "$GITHUB_ENV"
+
   {
     echo "project-name=$project_name"
     echo "manifest-account=$account"
