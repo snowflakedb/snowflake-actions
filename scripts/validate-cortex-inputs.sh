@@ -8,7 +8,8 @@
 # input the consumer actually set.
 #
 # Env:
-#   CHANNEL             Channel value to validate (stable|beta).
+#   CHANNEL             Channel value to validate (stable|beta). The exec
+#                       subcommand is GA on stable from v1.1.41.
 #   VERSION             Version value to validate (latest, or a version like
 #                       1.5.2 or 0.26.106+015728.dcf1621f with build metadata).
 #   CHANNEL_INPUT_NAME  Input name for error messages (default "cli-channel").

@@ -1,13 +1,13 @@
 # cortex-code/action.yml
 name: "Cortex Code CLI"
-description: "[Public preview] Install and configure the Cortex Code CLI (cortex) for CI/CD workflows."
+description: "Install and configure the Cortex Code CLI (cortex) for CI/CD workflows."
 branding:
   icon: "cpu"
   color: "blue"
 
 inputs:
   cli-channel:
-    description: "Install channel: stable or beta"
+    description: "Install channel: stable or beta. The exec subcommand is available on stable from v1.1.41."
     required: false
     default: "stable"
 
