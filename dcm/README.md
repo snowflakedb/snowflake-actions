@@ -164,6 +164,8 @@ Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step
 
 The summary (and PR comment, when enabled) includes a color-coded list of the planned operations parsed from `plan_result.json`, using colored squares so the change type is clearly visible in the PR comment expander: 🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`.
 
+Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-use#plan-only-changed-definitions-plan-delta), which evaluates only the definitions changed since the last deployment plus any definitions that depend on them. This is faster for incremental changes, but because it skips unchanged definitions it does not detect changes made outside DCM Projects since the last deployment. Run a full plan before deploying. When `plan-delta` is enabled, the summary includes a note that the plan was partial.
+
 ```yaml
 - uses: snowflakedb/snowflake-actions/dcm/plan@v3
   with:
@@ -182,6 +184,7 @@ The summary (and PR comment, when enabled) includes a color-coded list of the pl
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `create-if-not-exists` | no | `true` | Run `snow dcm create --if-not-exists` before planning |
 | `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR |
+| `plan-delta` | no | `false` | Run `snow dcm plan --delta` instead of a full plan |
 
 ### Outputs
 
@@ -197,6 +200,8 @@ The summary (and PR comment, when enabled) includes a color-coded list of the pl
 Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying.
 
 The `dcm-plan` action **must** run before this action in the same job -- it produces the `out/plan/plan_result.json` file used for drop detection.
+
+⚠️ If the preceding `dcm-plan` step ran with `plan-delta: "true"`, the changeset in `plan_result.json` is partial and drop detection only covers the changed definitions and their dependents. Use a full plan when drop detection needs to be complete.
 
 The deployment alias passed to `snow dcm deploy --alias` is set automatically to the source branch of the associated pull request (resolved from `pull_request` events directly, or via the merge commit on `push` events). When no PR branch can be found, no alias is passed.
 

@@ -33,6 +33,11 @@
 #             snowflake-user: ${{ env.SNOWFLAKE_USER }}
 #             comment-on-pr: "true"
 #
+#   Set plan-delta: "true" to run `snow dcm plan --delta`, which evaluates only
+#   the definitions changed since the last deployment plus any definitions that
+#   depend on them. This is faster for incremental changes but does not detect
+#   changes made outside DCM Projects, so run a full plan before deploying.
+#
 #   When comment-on-pr is enabled, the calling job also needs:
 #
 #     permissions:
@@ -62,6 +67,10 @@ inputs:
     default: "true"
   comment-on-pr:
     description: "Post the plan summary as a comment on the associated pull request"
+    required: false
+    default: "false"
+  plan-delta:
+    description: "Run snow dcm plan --delta, evaluating only changed definitions and their dependents. Set to 'true' for a faster incremental plan. A delta plan does not detect changes made outside DCM Projects since the last deployment."
     required: false
     default: "false"
 
@@ -103,6 +112,7 @@ runs:
       env:
         TARGET: ${{ inputs.target }}
         CREATE_IF_NOT_EXISTS: ${{ inputs.create-if-not-exists }}
+        PLAN_DELTA: ${{ inputs.plan-delta }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
 
@@ -122,8 +132,13 @@ runs:
 
         PLAN_OUTPUT_FILE="/tmp/dcm-plan-cli-output.txt"
 
+        DELTA_ARG=()
+        if [ "$PLAN_DELTA" = "true" ]; then
+          DELTA_ARG=(--delta)
+        fi
+
         # Run the plan, capturing CLI output while preserving the exit code
-        snow dcm plan --target "$TARGET" --save-output -x 2>&1 | tee "$PLAN_OUTPUT_FILE"
+        snow dcm plan --target "$TARGET" --save-output "${DELTA_ARG[@]}" -x 2>&1 | tee "$PLAN_OUTPUT_FILE"
         PLAN_EXIT="${PIPESTATUS[0]}"
 
         if [ "$PLAN_EXIT" -eq 0 ]; then
@@ -132,6 +147,13 @@ runs:
         else
           echo "result=failure" >> "$GITHUB_OUTPUT"
           dcm_emit_plan_summary failure "DCM Plan to ${TARGET} failed" "$PLAN_OUTPUT_FILE"
+        fi
+
+        if [ "$PLAN_DELTA" = "true" ]; then
+          gha_summary_line "⚠️ Delta plan: only definitions changed since the last deployment and their dependents were evaluated. Changes made outside DCM Projects are not detected. Run a full plan before deploying."
+        fi
+
+        if [ "$PLAN_EXIT" -ne 0 ]; then
           echo "plan-file=" >> "$GITHUB_OUTPUT"
           exit 1
         fi
