@@ -95,7 +95,6 @@ runs:
       uses: snowflakedb/snowflake-actions@v3
       with:
         use-oidc: true
-        custom-github-ref: "dcm-early-access"
 
     - name: Set connection env vars
       shell: bash
