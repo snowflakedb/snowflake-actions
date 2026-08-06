@@ -183,5 +183,5 @@ runs:
       uses: actions/github-script@v7
       with:
         script: |
-          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
-          await postSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}:${{ env.DCM_PROJECT_SLUG }}');
+          const { postVersionedSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postVersionedSummaryComment(github, context, '/tmp/dcm-plan-summary.md', 'Could not read plan summary.', 'dcm-plan:${{ inputs.target }}:${{ env.DCM_PROJECT_SLUG }}');

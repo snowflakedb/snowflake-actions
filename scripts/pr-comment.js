@@ -129,4 +129,109 @@ async function postSummaryComment(github, context, summaryFile, fallback, marker
   });
 }
 
-module.exports = { resolvePrNumber, resolvePrBranch, postSummaryComment };
+// Rewrite an already-posted comment body so its content sits inside a collapsed
+// <details> block. Returns null when the body is already collapsed or has no
+// recognisable content. `runLabel` is appended to the summary line when known.
+function collapseCommentBody(body, runLabel) {
+  if (!body || body.includes('<details>')) {
+    return null;
+  }
+
+  const lines = body.split('\n');
+  const markerLine = lines[0].startsWith('<!--') ? lines.shift() : null;
+
+  // Use the summary's own heading as the <summary> label, so the collapsed row
+  // still shows status and target without expanding.
+  let title = 'Previous DCM Plan';
+  const headingIndex = lines.findIndex(l => /^#{1,6}\s+\S/.test(l));
+  if (headingIndex !== -1) {
+    title = lines[headingIndex].replace(/^#{1,6}\s+/, '').trim();
+    lines.splice(headingIndex, 1);
+  }
+  if (runLabel) {
+    title += ` · ${runLabel}`;
+  }
+
+  // Lift the run link above the content so truncation can never cut it away.
+  let runLink = '';
+  const linkIndex = lines.findIndex(l => l.includes('](https://') && l.includes('/actions/runs/'));
+  if (linkIndex !== -1) {
+    runLink = `${lines[linkIndex].trim()}\n\n`;
+    lines.splice(linkIndex, 1);
+  }
+
+  const prefix =
+    `${markerLine ? `${markerLine}\n` : ''}<details><summary>${title}</summary>\n\n${runLink}`;
+  const footer = '\n</details>\n';
+
+  return assembleBody(prefix, `${lines.join('\n').trim()}\n`, footer);
+}
+
+// Post a summary as a new PR comment per run, collapsing the comments from
+// earlier runs of the same kind so only the latest output is expanded.
+//
+// `markerFamily` (e.g. 'dcm-plan:PREPROD:my-project') identifies the family of
+// comments to manage. Each comment carries `<!-- <family> run:<id>.<attempt> -->`
+// so a re-run of the same attempt updates its own comment in place instead of
+// stacking a duplicate.
+async function postVersionedSummaryComment(github, context, summaryFile, fallback, markerFamily) {
+  const prNumber = await resolvePrNumber(github, context);
+  if (prNumber == null) {
+    console.log('No PR found for this commit. Skipping comment.');
+    return;
+  }
+
+  const attempt = process.env.GITHUB_RUN_ATTEMPT || '1';
+  const runRef = `run:${context.runId}.${attempt}`;
+  const markerTag = `<!-- ${markerFamily} ${runRef} -->`;
+
+  let content;
+  try {
+    content = fs.readFileSync(summaryFile, 'utf8');
+  } catch {
+    content = `${fallback}\n`;
+  }
+  const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+  const body = assembleBody(
+    `${markerTag}\n`,
+    content,
+    `\n[🔎 View Full Run Details](${runUrl})\n`,
+  );
+
+  const { owner, repo } = context.repo;
+  const listParams = { owner, repo, issue_number: prNumber };
+  const comments = github.paginate
+    ? await github.paginate(github.rest.issues.listComments, listParams)
+    : (await github.rest.issues.listComments(listParams)).data;
+
+  // Comments from earlier runs, plus any single sticky comment written by an
+  // older version of this action (marker without a run reference).
+  const family = comments.filter(
+    c => c.body && c.body.includes(markerFamily) && !c.body.includes(markerTag),
+  );
+  for (const comment of family) {
+    const runMatch = comment.body.match(/run:(\d+)\.(\d+)/);
+    const runLabel = runMatch
+      ? `run ${runMatch[1]}${runMatch[2] === '1' ? '' : ` (attempt ${runMatch[2]})`}`
+      : null;
+    const collapsed = collapseCommentBody(comment.body, runLabel);
+    if (collapsed) {
+      await github.rest.issues.updateComment({ owner, repo, comment_id: comment.id, body: collapsed });
+    }
+  }
+
+  const current = comments.find(c => c.body && c.body.includes(markerTag));
+  if (current) {
+    await github.rest.issues.updateComment({ owner, repo, comment_id: current.id, body });
+    return;
+  }
+
+  await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+}
+
+module.exports = {
+  resolvePrNumber,
+  resolvePrBranch,
+  postSummaryComment,
+  postVersionedSummaryComment,
+};
