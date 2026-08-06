@@ -8,6 +8,43 @@
 
 const fs = require('fs');
 
+// GitHub rejects issue/PR comment bodies longer than this with
+// "body is too long (maximum is 65536 characters)".
+const MAX_COMMENT_LENGTH = 65536;
+
+// Trim content so that `prefix + content + footer` fits within GitHub's comment
+// size limit, cutting at a line boundary and closing an open ``` fence so the
+// remaining markdown still renders. Returns the assembled body.
+function assembleBody(prefix, content, footer) {
+  if (prefix.length + content.length + footer.length <= MAX_COMMENT_LENGTH) {
+    return prefix + content + footer;
+  }
+
+  const notice =
+    "\n> ⚠️ Output truncated: the full summary exceeded GitHub's " +
+    `${MAX_COMMENT_LENGTH}-character comment limit. ` +
+    'See the run log and the uploaded artifact for the complete output.\n';
+
+  // Reserve room for the notice, the footer and a possible closing fence.
+  const fenceClose = '```\n';
+  const budget =
+    MAX_COMMENT_LENGTH - prefix.length - footer.length - notice.length - fenceClose.length;
+
+  let kept = content.slice(0, Math.max(budget, 0));
+  const lastNewline = kept.lastIndexOf('\n');
+  if (lastNewline > 0) {
+    kept = kept.slice(0, lastNewline + 1);
+  }
+
+  // An odd number of fences means the truncation happened inside a code block.
+  const fenceCount = (kept.match(/^```/gm) || []).length;
+  if (fenceCount % 2 === 1) {
+    kept += fenceClose;
+  }
+
+  return prefix + kept + notice + footer;
+}
+
 // Resolve the PR number associated with the current event/commit, or null.
 async function resolvePrNumber(github, context) {
   if (context.eventName === 'pull_request') {
@@ -54,14 +91,17 @@ async function postSummaryComment(github, context, summaryFile, fallback, marker
 
   const markerTag = marker ? `<!-- ${marker} -->` : null;
 
-  let body = markerTag ? `${markerTag}\n` : '';
+  const prefix = markerTag ? `${markerTag}\n` : '';
+  let content;
   try {
-    body += fs.readFileSync(summaryFile, 'utf8');
+    content = fs.readFileSync(summaryFile, 'utf8');
   } catch {
-    body += `${fallback}\n`;
+    content = `${fallback}\n`;
   }
   const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-  body += `\n[🔎 View Full Run Details](${runUrl})\n`;
+  const footer = `\n[🔎 View Full Run Details](${runUrl})\n`;
+
+  const body = assembleBody(prefix, content, footer);
 
   if (markerTag) {
     const { data: comments } = await github.rest.issues.listComments({

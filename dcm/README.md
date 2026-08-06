@@ -183,7 +183,7 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `create-if-not-exists` | no | `true` | Run `snow dcm create --if-not-exists` before planning |
-| `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR |
+| `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR. Output that exceeds GitHub's 65536-character comment limit is truncated with a pointer to the run log and the uploaded artifact. |
 | `plan-delta` | no | `false` | Run `snow dcm plan --delta` instead of a full plan |
 
 ### Outputs
@@ -223,7 +223,7 @@ The deployment alias passed to `snow dcm deploy --alias` is set automatically to
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `allow-drops` | no | `false` | Set to `true` to skip destructive drop detection |
-| `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR |
+| `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR. Output that exceeds GitHub's 65536-character comment limit is truncated with a pointer to the run log. |
 | `post-scripts-path` | no | `""` | Relative path (from project-path) to a directory of `.sql` files to run after deploy. Files are executed alphabetically with Jinja templating using manifest variables. |
 
 ### Outputs
