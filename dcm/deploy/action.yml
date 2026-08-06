@@ -114,7 +114,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.project-path }}
       run: |
-        PLAN_FILE="out/plan/plan_result.json"
+        PLAN_FILE="out/plan_result.json"
         if [ ! -f "$PLAN_FILE" ]; then
           echo "### ⚠️ Plan output file not found at \`$PLAN_FILE\`! Run the dcm-plan action first." | tee -a "$GHA_SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
           exit 1
