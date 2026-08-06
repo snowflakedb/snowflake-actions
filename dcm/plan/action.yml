@@ -157,7 +157,7 @@ runs:
           exit 1
         fi
 
-        echo "plan-file=${PROJECT_PATH%/}/out/plan/plan_result.json" >> "$GITHUB_OUTPUT"
+        echo "plan-file=${PROJECT_PATH%/}/out/plan_result.json" >> "$GITHUB_OUTPUT"
 
     - name: Write result artifact
       if: always()
@@ -175,7 +175,7 @@ runs:
       with:
         name: dcm-plan-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: |
-          ${{ env.PROJECT_PATH }}/out/plan/plan_result.json
+          ${{ env.PROJECT_PATH }}/out/plan_result.json
           /tmp/dcm-results/dcm-plan-${{ inputs.target }}.txt
 
     - name: Comment on PR

@@ -199,7 +199,7 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 
 Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying.
 
-The `dcm-plan` action **must** run before this action in the same job -- it produces the `out/plan/plan_result.json` file used for drop detection.
+The `dcm-plan` action **must** run before this action in the same job -- it produces the `out/plan_result.json` file used for drop detection.
 
 ⚠️ If the preceding `dcm-plan` step ran with `plan-delta: "true"`, the changeset in `plan_result.json` is partial and drop detection only covers the changed definitions and their dependents. Use a full plan when drop detection needs to be complete.
 
