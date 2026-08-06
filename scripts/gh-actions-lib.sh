@@ -19,6 +19,46 @@ gha_summary_line() {
   fi
 }
 
+# Write one line to $GITHUB_STEP_SUMMARY only, leaving the PR-comment copy out.
+gha_summary_line_step_only() {
+  printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+}
+
+# Arm the anchor filter for one command-output block.
+#
+# When GHA_COMMENT_ANCHOR_REGEX is set and the output file contains a line
+# matching it, gha_summary_output_line sends every line before that first match
+# to the step summary only. Progress and other preamble stay in the job summary
+# and the Actions log while the PR comment starts at the payload. When no line
+# matches, the filter stays off so nothing is dropped.
+# Usage: gha_arm_anchor_filter <output-file>
+gha_arm_anchor_filter() {
+  local output_file="$1"
+  _GHA_ANCHOR_ACTIVE=0
+  _GHA_ANCHOR_SEEN=0
+  if [ -n "${GHA_COMMENT_ANCHOR_REGEX:-}" ] && [ -s "$output_file" ]; then
+    if grep -Eq "$GHA_COMMENT_ANCHOR_REGEX" "$output_file"; then
+      _GHA_ANCHOR_ACTIVE=1
+    fi
+  fi
+}
+
+# Write one line of captured command output, honouring the anchor filter.
+# Usage: gha_summary_output_line <text> [raw-line-for-matching]
+# Pass the raw line when <text> carries a prefix (e.g. a status emoji) that would
+# otherwise keep the anchor from matching.
+gha_summary_output_line() {
+  if [ "${_GHA_ANCHOR_ACTIVE:-0}" = "1" ] && [ "${_GHA_ANCHOR_SEEN:-0}" = "0" ]; then
+    if [[ ${2-$1} =~ $GHA_COMMENT_ANCHOR_REGEX ]]; then
+      _GHA_ANCHOR_SEEN=1
+    else
+      gha_summary_line_step_only "$1"
+      return
+    fi
+  fi
+  gha_summary_line "$1"
+}
+
 # Render a command-output summary block (status icon + header + fenced output)
 # to the step summary and, when set, the PR-comment file.
 #
@@ -36,8 +76,9 @@ gha_emit_summary() {
 
   gha_summary_line '```'
   if [ -s "$output_file" ]; then
+    gha_arm_anchor_filter "$output_file"
     while IFS= read -r line; do
-      gha_summary_line "$line"
+      gha_summary_output_line "$line"
     done < "$output_file"
   else
     gha_summary_line "No output captured. Check the Actions log for details."
