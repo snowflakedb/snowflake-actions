@@ -66,14 +66,15 @@ dcm_read_manifest() {
   } >> "$GITHUB_OUTPUT"
 }
 
-# Emit a DCM plan step summary with emoji injected inline into the CLI output.
-# Lines that start with CREATE/ALTER/DROP are prefixed with 🟩/🟨/🟥 so the
-# colour coding is part of the output tree rather than a separate section.
-# GitHub strips HTML/CSS in PR comments, so emoji is the only reliably visible
-# colouring option.
+# Emit a step summary for a command that prints a DCM changeset, with emoji
+# injected inline into the CLI output. Used by both plan and deploy, which render
+# the same changeset format. Lines that start with CREATE/ALTER/DROP are prefixed
+# with 🟩/🟨/🟥 so the colour coding is part of the output tree rather than a
+# separate section. GitHub strips HTML/CSS in PR comments, so emoji is the only
+# reliably visible colouring option.
 #
-# Usage: dcm_emit_plan_summary <success|failure> <header> <output-file>
-dcm_emit_plan_summary() {
+# Usage: dcm_emit_changeset_summary <success|failure> <header> <output-file>
+dcm_emit_changeset_summary() {
   local status="$1"
   local header="$2"
   local output_file="$3"

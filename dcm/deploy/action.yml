@@ -158,7 +158,7 @@ runs:
         TARGET: ${{ inputs.target }}
         PR_BRANCH: ${{ steps.pr_branch.outputs.branch }}
       run: |
-        . "$GITHUB_ACTION_PATH/../../scripts/gh-actions-lib.sh"
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
 
         ALIAS_ARG=()
         if [ -n "$PR_BRANCH" ]; then
@@ -176,10 +176,10 @@ runs:
 
         if [ "$EXIT_CODE" -eq 0 ]; then
           echo "result=success" >> "$GITHUB_OUTPUT"
-          gha_emit_summary success "DCM Deploy to ${TARGET} successful" "$DEPLOY_OUTPUT_FILE"
+          dcm_emit_changeset_summary success "DCM Deploy to ${TARGET} successful" "$DEPLOY_OUTPUT_FILE"
         else
           echo "result=failure" >> "$GITHUB_OUTPUT"
-          gha_emit_summary failure "DCM Deploy to ${TARGET} failed" "$DEPLOY_OUTPUT_FILE"
+          dcm_emit_changeset_summary failure "DCM Deploy to ${TARGET} failed" "$DEPLOY_OUTPUT_FILE"
           exit "$EXIT_CODE"
         fi
 
@@ -274,11 +274,13 @@ runs:
       if: always() && inputs.comment-on-pr == 'true'
       uses: actions/github-script@v7
       env:
-        # Fold the changeset rows away so the comment opens on the processing
-        # steps and the closing totals.
+        # Same changeset rendering as plan, but collapsed by default: by the time a
+        # deploy comment is read the same rows have already been reviewed in the
+        # plan comment, so the outcome line matters more than the detail.
         COMMENT_FOLD_START_REGEX: '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\s'
         COMMENT_FOLD_END_REGEX: '^(?:Planned|Deployed|Purged|No changes detected)'
         COMMENT_FOLD_LABEL: "collapse/expand"
+        COMMENT_FOLD_OPEN: "false"
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);

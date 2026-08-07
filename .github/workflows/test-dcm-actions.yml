@@ -109,8 +109,9 @@ jobs:
             fi
           }
 
-          # Deploy output in the released progress format.
-          emit released gha_emit_summary "$SANDBOX/released.txt"
+          # Deploy output in the released progress format, rendered by the same emitter as
+          # plan so the changeset carries the same colour coding.
+          emit released dcm_emit_changeset_summary "$SANDBOX/released.txt"
           for channel in "$STEP_FILE" "$COMMENT_FILE"; do
             assert_missing "$channel" 'UPLOAD - ⠋ Running...' 'a transient repaint must not reach either summary'
             assert_missing "$channel" 'RENDER - ⠙ Running...' 'every repaint is dropped, whatever the spinner frame'
@@ -118,7 +119,7 @@ jobs:
             assert_contains "$channel" '❯ Step 3/5 - COMPILE - ✓ Completed (0s)' 'every completed step line must be kept'
             assert_contains "$channel" '  • Create temporary stage inside DCM_DEMO.PROJECTS' 'step detail lines must be kept'
             assert_contains "$channel" '    ├── manifest.yml' 'the uploaded file tree must be kept'
-            assert_contains "$channel" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the changeset must be kept'
+            assert_contains "$channel" '🟨 ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'deploy changeset rows are colour-coded like plan rows'
             assert_contains "$channel" '└─ changed COMMENT: Running... nightly → Running... hourly' 'the pattern is anchored, so object text mentioning Running... is kept'
             assert_contains "$channel" 'Deployed 2 entities (0 created, 2 altered, 0 dropped).' 'the totals line must be kept'
             assert_contains "$channel" 'Artifacts saved to: /home/runner/work/x/out' 'trailing output must be kept'
@@ -126,7 +127,7 @@ jobs:
           echo 'PASS: repaints are dropped from both summaries, completed steps kept'
 
           # Plan output in the redesigned progress format, which the emoji coding also touches.
-          emit redesigned dcm_emit_plan_summary "$SANDBOX/redesigned.txt"
+          emit redesigned dcm_emit_changeset_summary "$SANDBOX/redesigned.txt"
           for channel in "$STEP_FILE" "$COMMENT_FILE"; do
             assert_missing "$channel" 'PLAN       ⠋' 'a spinner-only row is transient and must be dropped'
             assert_contains "$channel" 'UPLOAD     ✓  (1.3s)' 'completed rows of the newer layout must be kept'
@@ -139,7 +140,7 @@ jobs:
           echo 'PASS: the newer progress layout is filtered the same way'
 
           # A failed step must survive: it is the only diagnostic in the summary.
-          emit failed dcm_emit_plan_summary "$SANDBOX/failed.txt"
+          emit failed dcm_emit_changeset_summary "$SANDBOX/failed.txt"
           for channel in "$STEP_FILE" "$COMMENT_FILE"; do
             assert_missing "$channel" 'RENDER - ⠋ Running...' 'the repaint is still dropped on failure'
             assert_contains "$channel" '❯ Step 2/5 - RENDER - ✗ Failed (1s)' 'the failed step line must be kept'
@@ -234,13 +235,15 @@ jobs:
           }
 
           // The DCM actions set these on the comment step; unset means no restructuring.
-          function withFoldConfig(enabled) {
+          function withFoldConfig(enabled, open = true) {
             if (!enabled) {
               delete process.env.COMMENT_FOLD_START_REGEX;
               delete process.env.COMMENT_FOLD_END_REGEX;
               delete process.env.COMMENT_FOLD_LABEL;
+              delete process.env.COMMENT_FOLD_OPEN;
               return;
             }
+            process.env.COMMENT_FOLD_OPEN = String(open);
             process.env.COMMENT_FOLD_START_REGEX = '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\\s';
             process.env.COMMENT_FOLD_END_REGEX = '^(?:Planned|Deployed|Purged|No changes detected)';
             process.env.COMMENT_FOLD_LABEL = 'collapse/expand';
@@ -305,6 +308,23 @@ jobs:
               assert.ok(afterFold.includes('Artifacts saved to: /home/runner/work/x/out'), 'trailing output stays visible');
               assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'every fenced block is closed');
               console.log('PASS: the changeset is in an expanded section, steps and totals stay visible');
+            }
+
+            // Deploy asks for the same section collapsed, since the rows were already
+            // reviewed in the plan comment.
+            {
+              withFoldConfig(true, false);
+              const github = stubGithub();
+              await postSummaryComment(github, prContext, summaryFile('closed.md', planSummary(3)), 'fallback', 'dcm-deploy:PREPROD:proj');
+              const body = only(github).body;
+              assert.ok(body.includes('<details><summary>collapse/expand</summary>'),
+                'COMMENT_FOLD_OPEN=false renders the section collapsed');
+              assert.ok(!body.includes('<details open>'), 'the open attribute is omitted');
+              assert.ok(inFoldOf(body).includes('🟩 CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_0'),
+                'the rows are still present, just collapsed');
+              assert.ok(body.split('<details')[0].includes('❯ Step 1/4 - UPLOAD - ✓ Completed (1s)'),
+                'the steps stay visible above the collapsed section');
+              console.log('PASS: the section can start collapsed for deploy');
             }
 
             // An empty changeset has no rows to fold, so nothing is folded.

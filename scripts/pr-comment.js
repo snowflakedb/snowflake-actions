@@ -73,6 +73,8 @@ function renderCommentBody(content) {
   const foldStart = pattern('COMMENT_FOLD_START_REGEX');
   const foldEnd = pattern('COMMENT_FOLD_END_REGEX');
   const label = process.env.COMMENT_FOLD_LABEL || 'Details';
+  // Expanded unless the caller asks otherwise, so the section stays discoverable.
+  const openAttribute = process.env.COMMENT_FOLD_OPEN === 'false' ? '' : ' open';
 
   if (!foldStart) {
     return content;
@@ -108,9 +110,10 @@ function renderCommentBody(content) {
     if (head.length) {
       rendered.push('```', ...head, '```', '');
     }
-    // Expanded by default, so the changeset is visible without a click; the
-    // reader can fold it away when it runs long.
-    rendered.push(`<details open><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
+    // Expanded by default, so the section is visible without a click; the reader
+    // can fold it away when it runs long. A caller whose reader has already seen
+    // the same rows elsewhere can start it collapsed via COMMENT_FOLD_OPEN=false.
+    rendered.push(`<details${openAttribute}><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
     if (tail.length) {
       rendered.push('', '```', ...tail, '```');
     }

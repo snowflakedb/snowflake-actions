@@ -91,17 +91,16 @@ everything, so step timings remain available when a step hangs.
 
 **Step summary.** One fenced block per section, in the order the CLI produced it.
 
-**PR comment.** The changeset rows move into their own section, expanded by default so
-it stays discoverable, and collapsible when the list runs long. The summary line reads
-`collapse/expand` to signal that it is interactive. The comment therefore opens on the
-processing steps, the changeset and the closing totals line (`Planned 416 entities
-(...)` or `Deployed 2 entities (...)`):
+**PR comment.** The changeset rows move into their own section, whose summary line
+reads `collapse/expand` to signal that it is interactive. The comment therefore
+opens on the processing steps, the changeset and the closing totals line (`Planned
+416 entities (...)` or `Deployed 2 entities (...)`):
 
 ````markdown
-### ✅ DCM Deploy to DCM_DEV successful
+### ✅ DCM Plan to DCM_DEV successful
 ```
-❯ Step 1/5 - UPLOAD - ✓ Completed (1s)
-❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
+❯ Step 1/4 - UPLOAD - ✓ Completed (1s)
+❯ Step 4/4 - PLAN - ✓ Completed (2s)
 ```
 
 <details open><summary>collapse/expand</summary>
@@ -114,14 +113,20 @@ processing steps, the changeset and the closing totals line (`Planned 416 entiti
 </details>
 
 ```
-Deployed 2 entities (0 created, 2 altered, 0 dropped).
+Planned 2 entities (0 to create, 2 to alter, 0 to drop).
 ```
 ````
 
-Plan changeset rows are colour-coded so the change type is visible at a glance:
-🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`. Emoji is used because GitHub strips HTML and CSS
-from comment bodies. A failure before any changeset, and a plan with no changes,
-have no rows to move and are left flat.
+**Plan expands the section, deploy collapses it.** Both actions render the changeset
+identically, including the colour coding. The plan comment is where a reviewer reads
+what will change, so its section is open on load. By the time the deploy comment is
+read those same rows have been reviewed already, so its section starts collapsed and
+the outcome line leads. Either can be toggled by the reader.
+
+Changeset rows are colour-coded so the change type is visible at a glance: 🟩 `CREATE`,
+🟨 `ALTER`, 🟥 `DROP`. Emoji is used because GitHub strips HTML and CSS from comment
+bodies. A failure before any changeset, and a plan with no changes, have no rows to
+move and are left flat.
 
 **One comment per target and project.** Each comment carries a hidden marker built
 from the action, the target and the project name, so a later run updates the

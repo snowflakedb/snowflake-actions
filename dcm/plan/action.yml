@@ -142,10 +142,10 @@ runs:
 
         if [ "$PLAN_EXIT" -eq 0 ]; then
           echo "result=success" >> "$GITHUB_OUTPUT"
-          dcm_emit_plan_summary success "DCM Plan to ${TARGET} successful" "$PLAN_OUTPUT_FILE"
+          dcm_emit_changeset_summary success "DCM Plan to ${TARGET} successful" "$PLAN_OUTPUT_FILE"
         else
           echo "result=failure" >> "$GITHUB_OUTPUT"
-          dcm_emit_plan_summary failure "DCM Plan to ${TARGET} failed" "$PLAN_OUTPUT_FILE"
+          dcm_emit_changeset_summary failure "DCM Plan to ${TARGET} failed" "$PLAN_OUTPUT_FILE"
         fi
 
         if [ "$PLAN_DELTA" = "true" ]; then
@@ -182,12 +182,14 @@ runs:
       if: always() && inputs.comment-on-pr == 'true'
       uses: actions/github-script@v7
       env:
-        # Fold the changeset rows away so the comment opens on the processing
-        # steps and the closing totals. The optional emoji prefix matches the
-        # colour coding dcm_emit_plan_summary applies to CREATE/ALTER/DROP rows.
+        # Move the changeset rows into their own section, expanded by default: the
+        # plan comment is where a reviewer reads what will change. The optional
+        # emoji prefix matches the colour coding dcm_emit_changeset_summary applies
+        # to CREATE/ALTER/DROP rows.
         COMMENT_FOLD_START_REGEX: '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\s'
         COMMENT_FOLD_END_REGEX: '^(?:Planned|Deployed|Purged|No changes detected)'
         COMMENT_FOLD_LABEL: "collapse/expand"
+        COMMENT_FOLD_OPEN: "true"
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
