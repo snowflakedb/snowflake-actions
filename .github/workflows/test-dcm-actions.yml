@@ -1,0 +1,526 @@
+name: Test — DCM actions
+
+on:
+  pull_request:
+    paths:
+      - "dcm/**"
+      - "scripts/**"
+      - ".github/workflows/test-dcm-actions.yml"
+  push:
+    branches: [main]
+    paths:
+      - "dcm/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-test-pr-comment-size:
+    name: Unit test pr-comment.js size limiting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: PR comments stay within GitHub's size limit"
+        shell: bash
+        run: |
+          set -e
+          HARNESS="${RUNNER_TEMP}/pr-comment-size.test.js"
+          cat > "$HARNESS" <<'JS'
+          // Behaviour tests for postSummaryComment: size limiting and in-place updates.
+          const assert = require('node:assert');
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+
+          const { postSummaryComment } = require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
+
+          const LIMIT = 65536;
+          const FENCE = '```';
+          const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prcomment-'));
+
+          function summaryFile(name, rowCount) {
+            const lines = ['### ✅ DCM Plan to PREPROD successful', FENCE];
+            for (let i = 0; i < rowCount; i++) {
+              lines.push(`CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_${i}`);
+            }
+            lines.push(FENCE);
+            const file = path.join(tmp, name);
+            fs.writeFileSync(file, lines.join('\n') + '\n');
+            return file;
+          }
+
+          // Minimal stand-in for the github client actions/github-script provides.
+          function stubGithub(seed = []) {
+            const store = new Map(seed.map(c => [c.id, { ...c }]));
+            let nextId = 500;
+            const calls = { created: 0, updated: 0 };
+            return {
+              store,
+              calls,
+              paginate: async () => [...store.values()],
+              rest: {
+                issues: {
+                  listComments: async () => ({ data: [...store.values()] }),
+                  createComment: async (p) => {
+                    calls.created++;
+                    const id = nextId++;
+                    store.set(id, { id, body: p.body });
+                  },
+                  updateComment: async (p) => {
+                    calls.updated++;
+                    store.get(p.comment_id).body = p.body;
+                  },
+                },
+                repos: {
+                  listPullRequestsAssociatedWithCommit: async () => ({ data: [] }),
+                },
+              },
+            };
+          }
+
+          const prContext = { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId: 42 };
+          const only = (github) => [...github.store.values()][0];
+
+          async function main() {
+
+            // A summary that fits is posted verbatim, framed by the marker and the run link.
+            {
+              const github = stubGithub();
+              await postSummaryComment(github, prContext, summaryFile('small.md', 3), 'fallback', 'dcm-plan:PREPROD:proj');
+              const body = only(github).body;
+              assert.equal(github.calls.created, 1, 'expected one comment to be created');
+              assert.ok(body.startsWith('<!-- dcm-plan:PREPROD:proj -->\n'), 'marker must open the body');
+              assert.ok(body.includes('### ✅ DCM Plan to PREPROD successful'), 'heading must survive');
+              assert.ok(body.includes('CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_2'), 'output must survive');
+              assert.ok(body.trimEnd().endsWith('/actions/runs/42)'), 'run link must close the body');
+              assert.ok(!body.includes('truncated'), 'a body that fits must not be truncated');
+              console.log('PASS: a summary within the limit is posted unchanged');
+            }
+
+            // A summary larger than the limit is truncated instead of failing the job.
+            {
+              const github = stubGithub();
+              await postSummaryComment(github, prContext, summaryFile('big.md', 5000), 'fallback', 'dcm-plan:PREPROD:proj');
+              const body = only(github).body;
+              assert.ok(body.length <= LIMIT, `body must fit the limit, got ${body.length}`);
+              assert.ok(body.includes('Output truncated'), 'truncation must be disclosed');
+              assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'code fences must stay balanced');
+              assert.ok(body.startsWith('<!-- dcm-plan:PREPROD:proj -->\n'), 'marker must survive truncation');
+              assert.ok(body.trimEnd().endsWith('/actions/runs/42)'), 'run link must survive truncation');
+              assert.ok(body.includes('CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_0'), 'the head of the output is kept');
+              console.log('PASS: an oversized summary is truncated, fenced and still linked');
+            }
+
+            // Truncation cuts on a line boundary, never mid-line.
+            {
+              const github = stubGithub();
+              await postSummaryComment(github, prContext, summaryFile('boundary.md', 5000), 'fallback', 'dcm-plan:PREPROD:proj');
+              const body = only(github).body;
+              const rows = body.split('\n').filter(l => l.startsWith('CREATE TABLE '));
+              for (const row of rows) {
+                assert.match(row, /^CREATE TABLE MYDB\.MYSCHEMA\.SOME_TABLE_\d+$/, `row was cut mid-line: ${row}`);
+              }
+              console.log('PASS: truncation cuts on a line boundary');
+            }
+
+            // An unreadable summary file falls back to the caller's message.
+            {
+              const github = stubGithub();
+              await postSummaryComment(github, prContext, path.join(tmp, 'absent.md'), 'Could not read plan summary.', 'dcm-plan:PREPROD:proj');
+              const body = only(github).body;
+              assert.ok(body.includes('Could not read plan summary.'), 'fallback text must be used');
+              console.log('PASS: a missing summary file falls back to the given message');
+            }
+
+            // A second run updates the existing comment rather than stacking a new one.
+            {
+              const github = stubGithub([{ id: 1, body: '<!-- dcm-plan:PREPROD:proj -->\nstale output\n' }]);
+              await postSummaryComment(github, prContext, summaryFile('update.md', 2), 'fallback', 'dcm-plan:PREPROD:proj');
+              assert.equal(github.calls.created, 0, 'no new comment when the marker already exists');
+              assert.equal(github.calls.updated, 1, 'the existing comment is updated');
+              assert.equal(github.store.size, 1, 'the comment count stays at one');
+              assert.ok(!github.store.get(1).body.includes('stale output'), 'stale output is replaced');
+              console.log('PASS: a marked comment is updated in place across runs');
+            }
+
+            // Without an associated PR there is nothing to comment on.
+            {
+              const github = stubGithub();
+              const pushContext = { eventName: 'push', repo: { owner: 'o', repo: 'r' }, runId: 42, sha: 'deadbeef' };
+              await postSummaryComment(github, pushContext, summaryFile('nopr.md', 2), 'fallback', 'dcm-plan:PREPROD:proj');
+              assert.equal(github.calls.created, 0, 'nothing is posted when no PR is associated');
+              assert.equal(github.calls.updated, 0, 'nothing is updated when no PR is associated');
+              console.log('PASS: a commit with no associated PR is skipped');
+            }
+          }
+
+          main().catch((err) => {
+            console.error(`FAIL: ${err.message}`);
+            process.exit(1);
+          });
+          JS
+          node "$HARNESS"
+
+  unit-test-pr-comment-history:
+    name: Unit test pr-comment.js plan history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: earlier plans are collapsed, the latest stays expanded"
+        shell: bash
+        run: |
+          set -e
+          HARNESS="${RUNNER_TEMP}/pr-comment-history.test.js"
+          cat > "$HARNESS" <<'JS'
+          // Behaviour tests for postVersionedSummaryComment: one comment per run, with the
+          // comments of earlier runs collapsed so only the latest plan is expanded.
+          const assert = require('node:assert');
+          const fs = require('fs');
+          const os = require('os');
+          const path = require('path');
+
+          const { postVersionedSummaryComment } = require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
+
+          const LIMIT = 65536;
+          const FENCE = '```';
+          const FAMILY = 'dcm-plan:PREPROD:proj';
+          const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prhistory-'));
+
+          function summaryFile(name, rowCount, target = 'PREPROD') {
+            const lines = [`### ✅ DCM Plan to ${target} successful`, FENCE];
+            for (let i = 0; i < rowCount; i++) {
+              lines.push(`CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_${i}`);
+            }
+            lines.push(FENCE);
+            const file = path.join(tmp, name);
+            fs.writeFileSync(file, lines.join('\n') + '\n');
+            return file;
+          }
+
+          function stubGithub(seed = []) {
+            const store = new Map(seed.map(c => [c.id, { ...c }]));
+            let nextId = 500;
+            const calls = { created: 0, updated: 0 };
+            return {
+              store,
+              calls,
+              paginate: async () => [...store.values()],
+              rest: {
+                issues: {
+                  listComments: async () => ({ data: [...store.values()] }),
+                  createComment: async (p) => {
+                    calls.created++;
+                    const id = nextId++;
+                    store.set(id, { id, body: p.body });
+                  },
+                  updateComment: async (p) => {
+                    calls.updated++;
+                    store.get(p.comment_id).body = p.body;
+                  },
+                },
+                repos: {
+                  listPullRequestsAssociatedWithCommit: async () => ({ data: [] }),
+                },
+              },
+            };
+          }
+
+          // Each workflow run gets its own context; a re-run reuses runId with a new attempt.
+          function contextFor(runId, attempt = 1) {
+            process.env.GITHUB_RUN_ATTEMPT = String(attempt);
+            return { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId };
+          }
+
+          const bodies = (github) => [...github.store.values()].map(c => c.body);
+          const expanded = (github) => bodies(github).filter(b => b.includes(FAMILY) && !b.includes('<details>'));
+          const collapsed = (github) => bodies(github).filter(b => b.includes(FAMILY) && b.includes('<details>'));
+
+          async function main() {
+            // A run on a PR with no prior comment posts one comment carrying its run reference.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(11), summaryFile('r11.md', 3), 'fallback', FAMILY);
+              assert.equal(github.store.size, 1, 'one comment per run');
+              assert.ok(bodies(github)[0].startsWith(`<!-- ${FAMILY} run:11.1 -->\n`), 'marker carries run id and attempt');
+              assert.ok(!bodies(github)[0].includes('<details>'), 'the latest plan is expanded');
+              console.log('PASS: the first run posts a single expanded comment');
+            }
+
+            // The next run adds its own comment and folds the previous one away.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(11), summaryFile('a.md', 3), 'fallback', FAMILY);
+              await postVersionedSummaryComment(github, contextFor(12), summaryFile('b.md', 4), 'fallback', FAMILY);
+              assert.equal(github.store.size, 2, 'history accumulates one comment per run');
+              assert.equal(expanded(github).length, 1, 'exactly one comment stays expanded');
+              assert.equal(collapsed(github).length, 1, 'the earlier run is collapsed');
+              assert.ok(expanded(github)[0].includes('run:12.1'), 'the newest run is the expanded one');
+
+              const old = collapsed(github)[0];
+              assert.ok(old.startsWith(`<!-- ${FAMILY} run:11.1 -->\n<details>`), 'the marker is kept above the fold');
+              assert.ok(old.includes('<summary>✅ DCM Plan to PREPROD successful · run 11</summary>'),
+                'the heading becomes the summary line, so status and target show while collapsed');
+              assert.ok(old.includes('CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_2'), 'the collapsed output is retained in full');
+              assert.ok(old.trimEnd().endsWith('</details>'), 'the details block is closed');
+              console.log('PASS: a later run collapses the earlier one and stays expanded itself');
+            }
+
+            // Re-running the same attempt must refresh that run's comment, not duplicate it.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(12), summaryFile('c.md', 2), 'fallback', FAMILY);
+              await postVersionedSummaryComment(github, contextFor(12), summaryFile('c.md', 2), 'fallback', FAMILY);
+              assert.equal(github.store.size, 1, 'the same run does not stack a second comment');
+              assert.equal(github.calls.updated, 1, 'the run updates its own comment');
+              assert.ok(!bodies(github)[0].includes('<details>'), 'its comment stays expanded');
+              console.log('PASS: re-running the same attempt updates that run in place');
+            }
+
+            // A re-run of the workflow is a new version and gets its own labelled comment.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(12, 1), summaryFile('d.md', 2), 'fallback', FAMILY);
+              await postVersionedSummaryComment(github, contextFor(12, 2), summaryFile('e.md', 2), 'fallback', FAMILY);
+              assert.equal(github.store.size, 2, 'a second attempt is a separate version');
+              assert.ok(collapsed(github)[0].includes('· run 12</summary>'),
+                'the first attempt is labelled by run alone');
+              assert.ok(expanded(github)[0].includes('run:12.2'), 'the second attempt is the expanded one');
+
+              await postVersionedSummaryComment(github, contextFor(12, 3), summaryFile('e2.md', 2), 'fallback', FAMILY);
+              assert.ok(collapsed(github).some(b => b.includes('· run 12 (attempt 2)</summary>')),
+                'later attempts are named so two folds of the same run stay distinguishable');
+              console.log('PASS: a re-run is kept as its own version, labelled by attempt');
+            }
+
+            // A sticky comment from an earlier version of the action carries no run reference.
+            {
+              const github = stubGithub([{
+                id: 1,
+                body: `<!-- ${FAMILY} -->\n### ✅ DCM Plan to PREPROD successful\n${FENCE}\nCREATE TABLE MYDB.MYSCHEMA.OLD\n${FENCE}\n\n[🔎 View Full Run Details](https://github.com/o/r/actions/runs/9)\n`,
+              }]);
+              await postVersionedSummaryComment(github, contextFor(13), summaryFile('f.md', 2), 'fallback', FAMILY);
+              const legacy = github.store.get(1).body;
+              assert.ok(legacy.includes('<details>'), 'a legacy sticky comment is collapsed too');
+              assert.ok(legacy.includes('<summary>✅ DCM Plan to PREPROD successful</summary>'),
+                'with no run reference to add, the heading alone is the summary line');
+              assert.equal(expanded(github).length, 1, 'only the new run is left expanded');
+              console.log('PASS: a sticky comment from an earlier action version is collapsed');
+            }
+
+            // Collapsing is idempotent: an already-folded comment is left untouched.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(11), summaryFile('g.md', 2), 'fallback', FAMILY);
+              await postVersionedSummaryComment(github, contextFor(12), summaryFile('h.md', 2), 'fallback', FAMILY);
+              const afterFirstFold = github.store.get(500).body;
+              await postVersionedSummaryComment(github, contextFor(13), summaryFile('i.md', 2), 'fallback', FAMILY);
+              assert.equal(github.store.get(500).body, afterFirstFold, 'a collapsed comment is not rewritten again');
+              assert.equal(collapsed(github).length, 2, 'both earlier runs stay collapsed');
+              console.log('PASS: comments already collapsed are not rewritten');
+            }
+
+            // Another target keeps its own history and is never folded by this one.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(11), summaryFile('j.md', 2, 'PROD'), 'fallback', 'dcm-plan:PROD:proj');
+              await postVersionedSummaryComment(github, contextFor(12), summaryFile('k.md', 2), 'fallback', FAMILY);
+              const prod = bodies(github).find(b => b.includes('dcm-plan:PROD:proj'));
+              assert.ok(!prod.includes('<details>'), 'a different target is left expanded');
+              console.log('PASS: each target keeps a separate comment history');
+            }
+
+            // Size limiting applies to posting and to folding, so history never breaks the job.
+            {
+              const github = stubGithub();
+              await postVersionedSummaryComment(github, contextFor(14), summaryFile('big1.md', 5000), 'fallback', FAMILY);
+              await postVersionedSummaryComment(github, contextFor(15), summaryFile('big2.md', 5000), 'fallback', FAMILY);
+              for (const body of bodies(github)) {
+                assert.ok(body.length <= LIMIT, `every comment must fit the limit, got ${body.length}`);
+                assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'code fences stay balanced');
+              }
+              const old = collapsed(github)[0];
+              assert.ok(old.includes('Output truncated'), 'a truncated fold discloses it');
+              assert.ok(old.trimEnd().endsWith('</details>'), 'the details block is closed after truncation');
+              const summaryLine = old.split('\n').findIndex(l => l.startsWith('<details>'));
+              const linkLine = old.split('\n').findIndex(l => l.includes('/actions/runs/14)'));
+              assert.ok(linkLine > summaryLine && linkLine < summaryLine + 4,
+                'the run link sits directly under the summary line so truncation cannot cut it');
+              console.log('PASS: oversized plans are truncated when posted and when collapsed');
+            }
+
+            // Without an associated PR there is nothing to comment on.
+            {
+              const github = stubGithub();
+              const pushContext = { eventName: 'push', repo: { owner: 'o', repo: 'r' }, runId: 42, sha: 'deadbeef' };
+              await postVersionedSummaryComment(github, pushContext, summaryFile('l.md', 2), 'fallback', FAMILY);
+              assert.equal(github.store.size, 0, 'nothing is posted when no PR is associated');
+              console.log('PASS: a commit with no associated PR is skipped');
+            }
+          }
+
+          main().catch((err) => {
+            console.error(`FAIL: ${err.message}`);
+            process.exit(1);
+          });
+          JS
+          node "$HARNESS"
+
+  unit-test-summary-anchor:
+    name: Unit test summary anchor filtering
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: step progress is left out of the PR comment only"
+        shell: bash
+        run: |
+          set -e
+          HARNESS="${RUNNER_TEMP}/summary-anchor.test.sh"
+          cat > "$HARNESS" <<'SH'
+          #!/usr/bin/env bash
+          # Behaviour tests for the anchor filter in gh-actions-lib.sh and dcm-lib.sh:
+          # the PR-comment copy starts at the changeset, the job summary keeps everything.
+          set -euo pipefail
+
+          WORKSPACE="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
+          SANDBOX="$(mktemp -d)"
+
+          # Progress format of the released CLI: "❯ Step n/m - LABEL - verb".
+          cat > "$SANDBOX/released.txt" <<'EOF'
+          ❯ Step 1/5 - UPLOAD - ⠋ Running...
+            • Create temporary stage inside DCM_DEMO.PROJECTS
+            • Upload files
+              ├── manifest.yml
+              └── sources
+          ❯ Step 1/5 - UPLOAD - ✓ Completed (1s)
+          ❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
+
+          ALTER    DATABASE    DCM_ENV_DEMO_VAR
+          └─ changed COMMENT: Build 5 → Build 6
+
+          Deployed 2 entities (0 created, 2 altered, 0 dropped).
+          Artifacts saved to: /home/runner/work/x/out
+          EOF
+
+          # Progress format of a later CLI: "LABEL  ✓  (1.3s)".
+          cat > "$SANDBOX/redesigned.txt" <<'EOF'
+          UPLOAD     ✓  (1.3s)
+            Creating temporary stage inside DCM_DEMO.PROJECTS.
+          RENDER     ✓  (3.0s)
+          PLAN       ⠋
+          CREATE   TABLE       MYDB.MYSCHEMA.T1
+          DROP     VIEW        MYDB.MYSCHEMA.V1
+          Planned 2 entities (1 to create, 0 to alter, 1 to drop).
+          EOF
+
+          # A failure before the changeset: the progress lines are the only diagnostic.
+          cat > "$SANDBOX/failed.txt" <<'EOF'
+          ❯ Step 2/5 - RENDER - ⠋ Running...
+          ❯ Step 2/5 - RENDER - ✗ Failed (1s)
+          Error: could not render sources/definitions/a.sql
+          EOF
+
+          cat > "$SANDBOX/empty.txt" <<'EOF'
+          ❯ Step 4/4 - PLAN - ✓ Completed (2s)
+          No changes detected.
+          EOF
+
+          # Render one output file through an emitter, into a fresh pair of summary files.
+          emit() {
+            local name="$1" emitter="$2" output_file="$3"
+            STEP_FILE="$SANDBOX/$name.step.md"
+            COMMENT_FILE="$SANDBOX/$name.comment.md"
+            : > "$STEP_FILE"
+            : > "$COMMENT_FILE"
+            (
+              export GITHUB_STEP_SUMMARY="$STEP_FILE"
+              export GHA_SUMMARY_FILE="$COMMENT_FILE"
+              # shellcheck source=/dev/null
+              . "$WORKSPACE/scripts/dcm-lib.sh"
+              "$emitter" success "DCM run to DEV successful" "$output_file"
+            )
+          }
+
+          assert_contains() {
+            grep -qF -- "$2" "$1" || { echo "FAIL: $3"; echo "--- $1 ---"; cat "$1"; exit 1; }
+          }
+
+          assert_missing() {
+            if grep -qF -- "$2" "$1"; then
+              echo "FAIL: $3"
+              echo "--- $1 ---"
+              cat "$1"
+              exit 1
+            fi
+          }
+
+          # Deploy output in the released progress format.
+          emit released gha_emit_summary "$SANDBOX/released.txt"
+          assert_missing "$COMMENT_FILE" '❯ Step 1/5' 'step progress must not reach the PR comment'
+          assert_missing "$COMMENT_FILE" 'Create temporary stage' 'indented progress detail must not reach the PR comment'
+          assert_contains "$COMMENT_FILE" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the changeset must reach the PR comment'
+          assert_contains "$COMMENT_FILE" 'changed COMMENT: Build 5 → Build 6' 'changeset detail lines must be kept'
+          assert_contains "$COMMENT_FILE" 'Deployed 2 entities (0 created, 2 altered, 0 dropped).' 'the summary line must be kept'
+          assert_contains "$COMMENT_FILE" 'Artifacts saved to: /home/runner/work/x/out' 'trailing output after the changeset must be kept'
+          assert_contains "$STEP_FILE" '❯ Step 1/5' 'the job summary must keep the step progress'
+          assert_contains "$STEP_FILE" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the job summary must keep the changeset'
+          echo 'PASS: released progress format is filtered out of the PR comment only'
+
+          # Plan output in the redesigned progress format, which the emoji coding also touches.
+          emit redesigned dcm_emit_plan_summary "$SANDBOX/redesigned.txt"
+          assert_missing "$COMMENT_FILE" 'UPLOAD     ✓' 'redesigned progress rows must not reach the PR comment'
+          assert_missing "$COMMENT_FILE" 'Creating temporary stage' 'redesigned progress detail must not reach the PR comment'
+          assert_contains "$COMMENT_FILE" '🟩 CREATE   TABLE       MYDB.MYSCHEMA.T1' 'CREATE rows keep their marker and reach the comment'
+          assert_contains "$COMMENT_FILE" '🟥 DROP     VIEW        MYDB.MYSCHEMA.V1' 'DROP rows keep their marker'
+          assert_contains "$COMMENT_FILE" 'Planned 2 entities' 'the plan summary line must be kept'
+          echo 'PASS: a changed progress format is still filtered, and emoji coding survives'
+
+          # No changeset at all: nothing may be dropped, or the comment would carry no diagnostic.
+          emit failed dcm_emit_plan_summary "$SANDBOX/failed.txt"
+          assert_contains "$COMMENT_FILE" '❯ Step 2/5 - RENDER - ✗ Failed (1s)' 'without an anchor the filter stays off'
+          assert_contains "$COMMENT_FILE" 'Error: could not render sources/definitions/a.sql' 'the error must reach the PR comment'
+          echo 'PASS: output without a changeset is passed through untouched'
+
+          # An empty changeset still has an anchor line.
+          emit empty dcm_emit_plan_summary "$SANDBOX/empty.txt"
+          assert_missing "$COMMENT_FILE" '❯ Step 4/4' 'progress is filtered for an empty changeset too'
+          assert_contains "$COMMENT_FILE" 'No changes detected.' 'the empty-changeset line must be kept'
+          echo 'PASS: an empty changeset keeps its summary line'
+
+          # The generic library filters nothing unless a caller sets an anchor.
+          STEP_FILE="$SANDBOX/generic.step.md"
+          COMMENT_FILE="$SANDBOX/generic.comment.md"
+          : > "$STEP_FILE"
+          : > "$COMMENT_FILE"
+          (
+            export GITHUB_STEP_SUMMARY="$STEP_FILE"
+            export GHA_SUMMARY_FILE="$COMMENT_FILE"
+            # shellcheck source=/dev/null
+            . "$WORKSPACE/scripts/gh-actions-lib.sh"
+            gha_emit_summary success "Generic command" "$SANDBOX/released.txt"
+          )
+          assert_contains "$COMMENT_FILE" '❯ Step 1/5' 'gh-actions-lib alone must not filter anything'
+          echo 'PASS: filtering is opt-in through GHA_COMMENT_ANCHOR_REGEX'
+
+          # Every case above must leave the job summary at least as complete as the comment.
+          for name in released redesigned failed empty; do
+            step_lines=$(wc -l < "$SANDBOX/$name.step.md")
+            comment_lines=$(wc -l < "$SANDBOX/$name.comment.md")
+            if [ "$step_lines" -lt "$comment_lines" ]; then
+              echo "FAIL: job summary for $name is shorter than the PR comment"
+              exit 1
+            fi
+          done
+          echo 'PASS: the job summary is never shorter than the PR comment'
+          SH
+          bash "$HARNESS"
