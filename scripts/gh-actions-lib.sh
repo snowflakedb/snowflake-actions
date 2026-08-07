@@ -19,38 +19,6 @@ gha_summary_line() {
   fi
 }
 
-# Write one line to $GITHUB_STEP_SUMMARY only, leaving the PR-comment copy out.
-gha_summary_line_step_only() {
-  printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
-}
-
-# Arm the output filter for one command-output block.
-# Usage: gha_arm_comment_filter <output-file>
-gha_arm_comment_filter() {
-  _GHA_FILTER_ACTIVE=0
-  if [ -n "${GHA_COMMENT_DROP_REGEX:-}" ] && [ -s "$1" ]; then
-    _GHA_FILTER_ACTIVE=1
-  fi
-}
-
-# Write one line of captured command output.
-#
-# When GHA_COMMENT_DROP_REGEX is set, lines matching it go to the step summary
-# only. It is meant for transient lines that a live progress renderer repaints,
-# which carry no information once the run has finished. Everything else, including
-# completed and failed step lines, reaches both channels.
-#
-# Usage: gha_summary_output_line <text> [raw-line-for-matching]
-# Pass the raw line when <text> carries a prefix (e.g. a status emoji) that would
-# otherwise change how the pattern matches.
-gha_summary_output_line() {
-  if [ "${_GHA_FILTER_ACTIVE:-0}" = "1" ] && [[ ${2-$1} =~ $GHA_COMMENT_DROP_REGEX ]]; then
-    gha_summary_line_step_only "$1"
-    return
-  fi
-  gha_summary_line "$1"
-}
-
 # Render a command-output summary block (status icon + header + fenced output)
 # to the step summary and, when set, the PR-comment file.
 #
@@ -68,9 +36,8 @@ gha_emit_summary() {
 
   gha_summary_line '```'
   if [ -s "$output_file" ]; then
-    gha_arm_comment_filter "$output_file"
     while IFS= read -r line; do
-      gha_summary_output_line "$line"
+      gha_summary_line "$line"
     done < "$output_file"
   else
     gha_summary_line "No output captured. Check the Actions log for details."

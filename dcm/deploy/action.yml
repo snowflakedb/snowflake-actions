@@ -273,6 +273,14 @@ runs:
     - name: Comment on PR
       if: always() && inputs.comment-on-pr == 'true'
       uses: actions/github-script@v7
+      env:
+        # Drop the transient lines the CLI's progress renderer repaints, and fold
+        # the changeset rows away so the comment opens on the processing steps and
+        # the closing totals.
+        COMMENT_DROP_REGEX: '(Running\.\.\.|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s*$'
+        COMMENT_FOLD_START_REGEX: '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\s'
+        COMMENT_FOLD_END_REGEX: '^(?:Planned|Deployed|Purged|No changes detected)'
+        COMMENT_FOLD_LABEL: "Changeset"
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);

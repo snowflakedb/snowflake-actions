@@ -27,8 +27,14 @@ function assembleBody(prefix, content, footer) {
 
   // Reserve room for the notice, the footer and a possible closing fence.
   const fenceClose = '```\n';
+  const detailsClose = '</details>\n';
   const budget =
-    MAX_COMMENT_LENGTH - prefix.length - footer.length - notice.length - fenceClose.length;
+    MAX_COMMENT_LENGTH -
+    prefix.length -
+    footer.length -
+    notice.length -
+    fenceClose.length -
+    detailsClose.length;
 
   let kept = content.slice(0, Math.max(budget, 0));
   const lastNewline = kept.lastIndexOf('\n');
@@ -42,7 +48,100 @@ function assembleBody(prefix, content, footer) {
     kept += fenceClose;
   }
 
+  // Same for a <details> block the cut landed inside.
+  const opened = (kept.match(/<details>/g) || []).length;
+  const closed = (kept.match(/<\/details>/g) || []).length;
+  if (opened > closed) {
+    kept += detailsClose;
+  }
+
   return prefix + kept + notice + footer;
+}
+
+// Restructure the PR-comment copy of a captured command output.
+//
+// Lines matching COMMENT_DROP_REGEX are removed, and the region from the first
+// line matching COMMENT_FOLD_START_REGEX up to the first line matching
+// COMMENT_FOLD_END_REGEX is moved into a collapsed <details> labelled
+// COMMENT_FOLD_LABEL. Only fenced blocks are touched, and only the block that
+// contains the fold start, so surrounding sections are left alone. With none of
+// the variables set the content is returned unchanged, which keeps this file free
+// of project-specific patterns.
+function renderCommentBody(content) {
+  // Unicode mode, so a character class can hold emoji: without it a class like
+  // [🟩🟨🟥] matches a single surrogate half and never the emoji itself.
+  const pattern = (name) => (process.env[name] ? new RegExp(process.env[name], 'u') : null);
+  const dropPattern = pattern('COMMENT_DROP_REGEX');
+  const foldStart = pattern('COMMENT_FOLD_START_REGEX');
+  const foldEnd = pattern('COMMENT_FOLD_END_REGEX');
+  const label = process.env.COMMENT_FOLD_LABEL || 'Details';
+
+  if (!dropPattern && !foldStart) {
+    return content;
+  }
+
+  const trimBlank = (lines) => {
+    let start = 0;
+    let end = lines.length;
+    while (start < end && lines[start].trim() === '') start++;
+    while (end > start && lines[end - 1].trim() === '') end--;
+    return lines.slice(start, end);
+  };
+
+  const renderBlock = (blockLines) => {
+    const kept = dropPattern ? blockLines.filter(l => !dropPattern.test(l)) : blockLines;
+    const startIndex = foldStart ? kept.findIndex(l => foldStart.test(l)) : -1;
+    if (startIndex === -1) {
+      return ['```', ...kept, '```'];
+    }
+
+    let endIndex = kept.length;
+    if (foldEnd) {
+      const offset = kept.slice(startIndex).findIndex(l => foldEnd.test(l));
+      if (offset !== -1) {
+        endIndex = startIndex + offset;
+      }
+    }
+
+    const head = trimBlank(kept.slice(0, startIndex));
+    const folded = trimBlank(kept.slice(startIndex, endIndex));
+    const tail = trimBlank(kept.slice(endIndex));
+
+    const rendered = [];
+    if (head.length) {
+      rendered.push('```', ...head, '```', '');
+    }
+    rendered.push(`<details><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
+    if (tail.length) {
+      rendered.push('', '```', ...tail, '```');
+    }
+    return rendered;
+  };
+
+  const out = [];
+  let block = null;
+  for (const line of content.split('\n')) {
+    if (line.trim() === '```') {
+      if (block === null) {
+        block = [];
+      } else {
+        out.push(...renderBlock(block));
+        block = null;
+      }
+      continue;
+    }
+    if (block === null) {
+      out.push(line);
+    } else {
+      block.push(line);
+    }
+  }
+  // An unterminated fence is left exactly as it was read.
+  if (block !== null) {
+    out.push('```', ...block);
+  }
+
+  return out.join('\n');
 }
 
 // Resolve the PR number associated with the current event/commit, or null.
@@ -101,7 +200,7 @@ async function postSummaryComment(github, context, summaryFile, fallback, marker
   const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
   const footer = `\n[🔎 View Full Run Details](${runUrl})\n`;
 
-  const body = assembleBody(prefix, content, footer);
+  const body = assembleBody(prefix, renderCommentBody(content), footer);
 
   if (markerTag) {
     const { data: comments } = await github.rest.issues.listComments({
