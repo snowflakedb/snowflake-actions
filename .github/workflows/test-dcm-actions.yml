@@ -228,7 +228,8 @@ jobs:
           const os = require('os');
           const path = require('path');
 
-          const { postSummaryComment } = require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
+          const { postSummaryComment, resolvePrNumber, resolvePrBranch } =
+            require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
 
           const LIMIT = 65536;
           const FENCE = '```';
@@ -291,6 +292,17 @@ jobs:
           }
 
           const prContext = { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId: 42 };
+
+          // What GitHub provides for a pull_request_target run: the payload names the PR,
+          // while context.sha is the tip of the default branch rather than the PR head.
+          const prTargetContext = {
+            eventName: 'pull_request_target',
+            issue: { number: 7 },
+            payload: { pull_request: { number: 7, head: { ref: 'feature/my-change' } } },
+            repo: { owner: 'o', repo: 'r' },
+            runId: 42,
+            sha: 'defaultbranchhead',
+          };
           const only = (github) => [...github.store.values()][0];
           const bodies = (github) => [...github.store.values()].map(c => c.body);
 
@@ -391,6 +403,41 @@ jobs:
               assert.equal(updated.length, 1, 'only the matching comment is rewritten');
               assert.ok(updated[0].includes('<!-- dcm-plan:PROD:proj-a -->'), 'the rewritten comment is the matching one');
               console.log('PASS: comments for other targets, projects and actions are left alone');
+            }
+
+            // pull_request_target must resolve the PR from the payload. Its context.sha is a
+            // commit on the default branch, so a commit lookup would return the PR that was
+            // merged last and the comment would land on a closed, unrelated PR.
+            {
+              let lookups = 0;
+              const github = stubGithub();
+              github.rest.repos.listPullRequestsAssociatedWithCommit = async () => {
+                lookups++;
+                return { data: [{ number: 999, head: { ref: 'previously/merged' } }] };
+              };
+
+              assert.equal(await resolvePrNumber(github, prTargetContext), 7,
+                'the PR number comes from the payload, not from the last merged PR');
+              assert.equal(await resolvePrBranch(github, prTargetContext), 'feature/my-change',
+                'the deploy alias comes from the PR head branch, not from the last merged PR');
+              assert.equal(lookups, 0, 'no commit lookup is attempted for pull_request_target');
+
+              await postSummaryComment(github, prTargetContext, summaryFile('prt.md', planSummary(2)), 'fallback', 'dcm-plan:PREPROD:proj');
+              assert.equal(github.calls.created, 1, 'the comment is posted');
+              assert.ok(only(github).body.includes('<!-- dcm-plan:PREPROD:proj -->'), 'the comment carries its marker');
+              console.log('PASS: pull_request_target resolves the PR from the payload');
+            }
+
+            // Events that carry no PR payload still fall back to the commit lookup.
+            {
+              const github = stubGithub();
+              github.rest.repos.listPullRequestsAssociatedWithCommit = async () => ({
+                data: [{ number: 123, head: { ref: 'topic/from-commit' } }],
+              });
+              const pushContext = { eventName: 'push', repo: { owner: 'o', repo: 'r' }, runId: 42, sha: 'abc123' };
+              assert.equal(await resolvePrNumber(github, pushContext), 123, 'push still resolves via the commit');
+              assert.equal(await resolvePrBranch(github, pushContext), 'topic/from-commit', 'push still resolves the branch via the commit');
+              console.log('PASS: push events still use the commit lookup');
             }
 
             // Without an associated PR there is nothing to comment on.

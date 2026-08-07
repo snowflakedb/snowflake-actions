@@ -132,6 +132,13 @@ from the action, the target and the project name, so a later run updates the
 comment it wrote before instead of adding another. Plans and deploys, and different
 targets or projects in the same pull request, keep separate comments.
 
+**Which triggers find the pull request.** On `pull_request` and
+`pull_request_target` the pull request is taken from the event payload. On any other
+trigger, `push` included, it is looked up from the commit that started the run, and
+when no pull request is associated the comment is skipped and the step logs
+`No PR found for this commit`. The same resolution decides the deployment alias
+`dcm-deploy` passes to `snow dcm deploy --alias`.
+
 **Size limit.** GitHub rejects comment bodies longer than 65536 characters, which a
 plan of a few hundred entities can exceed. A body over the limit is truncated at a
 line boundary, closing the changeset section if the cut landed inside it, with a

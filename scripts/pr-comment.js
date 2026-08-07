@@ -58,9 +58,18 @@ function assembleBody(prefix, content, footer) {
   return prefix + kept + notice + footer;
 }
 
+// Events whose payload already identifies the pull request, so no lookup is needed.
+//
+// The commit-based fallback below cannot serve pull_request_target: for that event
+// GITHUB_SHA points at the latest commit on the default branch, not at the PR head,
+// so looking the commit up returns whichever PR was merged last and the caller acts
+// on the wrong pull request. See
+// https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/
+const PULL_REQUEST_EVENTS = new Set(['pull_request', 'pull_request_target']);
+
 // Resolve the PR number associated with the current event/commit, or null.
 async function resolvePrNumber(github, context) {
-  if (context.eventName === 'pull_request') {
+  if (PULL_REQUEST_EVENTS.has(context.eventName)) {
     return context.issue.number;
   }
   const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
@@ -73,7 +82,7 @@ async function resolvePrNumber(github, context) {
 
 // Resolve the source branch of the associated PR, or '' when none is found.
 async function resolvePrBranch(github, context) {
-  if (context.eventName === 'pull_request') {
+  if (PULL_REQUEST_EVENTS.has(context.eventName)) {
     return context.payload.pull_request.head.ref || '';
   }
   try {
