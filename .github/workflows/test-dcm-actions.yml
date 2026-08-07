@@ -190,23 +190,24 @@ jobs:
           JS
           node "$HARNESS"
 
-  unit-test-summary-anchor:
-    name: Unit test summary anchor filtering
+  unit-test-summary-filter:
+    name: Unit test summary output filtering
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: "Test: step progress is left out of the PR comment only"
+      - name: "Test: transient progress repaints are left out of the PR comment"
         shell: bash
         run: |
           set -e
-          HARNESS="${RUNNER_TEMP}/summary-anchor.test.sh"
+          HARNESS="${RUNNER_TEMP}/summary-filter.test.sh"
           cat > "$HARNESS" <<'SH'
           #!/usr/bin/env bash
-          # Behaviour tests for the anchor filter in gh-actions-lib.sh and dcm-lib.sh:
-          # the PR-comment copy starts at the changeset, the job summary keeps everything.
+          # Behaviour tests for the PR-comment output filter in gh-actions-lib.sh and
+          # dcm-lib.sh: transient progress repaints are dropped from the comment, every
+          # completed or failed step line is kept, and the job summary keeps everything.
           set -euo pipefail
 
           WORKSPACE="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
@@ -220,36 +221,36 @@ jobs:
               ├── manifest.yml
               └── sources
           ❯ Step 1/5 - UPLOAD - ✓ Completed (1s)
-          ❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
+          ❯ Step 2/5 - RENDER - ⠙ Running...
+          ❯ Step 2/5 - RENDER - ✓ Completed (3s)
+          ❯ Step 3/5 - COMPILE - ✓ Completed (0s)
 
           ALTER    DATABASE    DCM_ENV_DEMO_VAR
           └─ changed COMMENT: Build 5 → Build 6
+          ALTER    TASK        DCM_ENV_DEMO_VAR.PUBLIC.LOAD
+          └─ changed COMMENT: Running... nightly → Running... hourly
 
           Deployed 2 entities (0 created, 2 altered, 0 dropped).
           Artifacts saved to: /home/runner/work/x/out
           EOF
 
-          # Progress format of a later CLI: "LABEL  ✓  (1.3s)".
+          # Progress format of a later CLI: "LABEL  ✓  (1.3s)", running steps spinner-only.
           cat > "$SANDBOX/redesigned.txt" <<'EOF'
           UPLOAD     ✓  (1.3s)
             Creating temporary stage inside DCM_DEMO.PROJECTS.
           RENDER     ✓  (3.0s)
           PLAN       ⠋
+          PLAN       ✓  (2.0s)
           CREATE   TABLE       MYDB.MYSCHEMA.T1
           DROP     VIEW        MYDB.MYSCHEMA.V1
           Planned 2 entities (1 to create, 0 to alter, 1 to drop).
           EOF
 
-          # A failure before the changeset: the progress lines are the only diagnostic.
+          # A failure during a step: the failed step line is the diagnostic and must stay.
           cat > "$SANDBOX/failed.txt" <<'EOF'
           ❯ Step 2/5 - RENDER - ⠋ Running...
           ❯ Step 2/5 - RENDER - ✗ Failed (1s)
           Error: could not render sources/definitions/a.sql
-          EOF
-
-          cat > "$SANDBOX/empty.txt" <<'EOF'
-          ❯ Step 4/4 - PLAN - ✓ Completed (2s)
-          No changes detected.
           EOF
 
           # Render one output file through an emitter, into a fresh pair of summary files.
@@ -283,38 +284,38 @@ jobs:
 
           # Deploy output in the released progress format.
           emit released gha_emit_summary "$SANDBOX/released.txt"
-          assert_missing "$COMMENT_FILE" '❯ Step 1/5' 'step progress must not reach the PR comment'
-          assert_missing "$COMMENT_FILE" 'Create temporary stage' 'indented progress detail must not reach the PR comment'
-          assert_contains "$COMMENT_FILE" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the changeset must reach the PR comment'
-          assert_contains "$COMMENT_FILE" 'changed COMMENT: Build 5 → Build 6' 'changeset detail lines must be kept'
+          assert_missing "$COMMENT_FILE" 'UPLOAD - ⠋ Running...' 'a transient repaint must not reach the PR comment'
+          assert_missing "$COMMENT_FILE" 'RENDER - ⠙ Running...' 'every transient repaint is dropped, whatever the spinner frame'
+          assert_contains "$COMMENT_FILE" '❯ Step 1/5 - UPLOAD - ✓ Completed (1s)' 'completed step lines must be kept'
+          assert_contains "$COMMENT_FILE" '❯ Step 3/5 - COMPILE - ✓ Completed (0s)' 'every completed step line must be kept'
+          assert_contains "$COMMENT_FILE" '  • Create temporary stage inside DCM_DEMO.PROJECTS' 'step detail lines must be kept'
+          assert_contains "$COMMENT_FILE" '    ├── manifest.yml' 'the uploaded file tree must be kept'
+          assert_contains "$COMMENT_FILE" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the changeset must be kept'
+          assert_contains "$COMMENT_FILE" '└─ changed COMMENT: Running... nightly → Running... hourly' 'the pattern is anchored, so object text mentioning Running... is kept'
           assert_contains "$COMMENT_FILE" 'Deployed 2 entities (0 created, 2 altered, 0 dropped).' 'the summary line must be kept'
-          assert_contains "$COMMENT_FILE" 'Artifacts saved to: /home/runner/work/x/out' 'trailing output after the changeset must be kept'
-          assert_contains "$STEP_FILE" '❯ Step 1/5' 'the job summary must keep the step progress'
-          assert_contains "$STEP_FILE" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the job summary must keep the changeset'
-          echo 'PASS: released progress format is filtered out of the PR comment only'
+          assert_contains "$COMMENT_FILE" 'Artifacts saved to: /home/runner/work/x/out' 'trailing output must be kept'
+          assert_contains "$STEP_FILE" 'UPLOAD - ⠋ Running...' 'the job summary keeps the transient lines too'
+          echo 'PASS: transient repaints are dropped, completed steps and details are kept'
 
           # Plan output in the redesigned progress format, which the emoji coding also touches.
           emit redesigned dcm_emit_plan_summary "$SANDBOX/redesigned.txt"
-          assert_missing "$COMMENT_FILE" 'UPLOAD     ✓' 'redesigned progress rows must not reach the PR comment'
-          assert_missing "$COMMENT_FILE" 'Creating temporary stage' 'redesigned progress detail must not reach the PR comment'
-          assert_contains "$COMMENT_FILE" '🟩 CREATE   TABLE       MYDB.MYSCHEMA.T1' 'CREATE rows keep their marker and reach the comment'
+          assert_missing "$COMMENT_FILE" 'PLAN       ⠋' 'a spinner-only row is transient and must be dropped'
+          assert_contains "$COMMENT_FILE" 'UPLOAD     ✓  (1.3s)' 'completed rows of the newer layout must be kept'
+          assert_contains "$COMMENT_FILE" 'PLAN       ✓  (2.0s)' 'the completed row replacing a spinner row must be kept'
+          assert_contains "$COMMENT_FILE" '  Creating temporary stage inside DCM_DEMO.PROJECTS.' 'detail lines of the newer layout must be kept'
+          assert_contains "$COMMENT_FILE" '🟩 CREATE   TABLE       MYDB.MYSCHEMA.T1' 'CREATE rows keep their marker'
           assert_contains "$COMMENT_FILE" '🟥 DROP     VIEW        MYDB.MYSCHEMA.V1' 'DROP rows keep their marker'
           assert_contains "$COMMENT_FILE" 'Planned 2 entities' 'the plan summary line must be kept'
-          echo 'PASS: a changed progress format is still filtered, and emoji coding survives'
+          echo 'PASS: the newer progress layout is filtered the same way'
 
-          # No changeset at all: nothing may be dropped, or the comment would carry no diagnostic.
+          # A failed step must survive: it is the only diagnostic in the comment.
           emit failed dcm_emit_plan_summary "$SANDBOX/failed.txt"
-          assert_contains "$COMMENT_FILE" '❯ Step 2/5 - RENDER - ✗ Failed (1s)' 'without an anchor the filter stays off'
+          assert_missing "$COMMENT_FILE" 'RENDER - ⠋ Running...' 'the transient line is still dropped on failure'
+          assert_contains "$COMMENT_FILE" '❯ Step 2/5 - RENDER - ✗ Failed (1s)' 'the failed step line must reach the PR comment'
           assert_contains "$COMMENT_FILE" 'Error: could not render sources/definitions/a.sql' 'the error must reach the PR comment'
-          echo 'PASS: output without a changeset is passed through untouched'
+          echo 'PASS: a failed step and its error are kept'
 
-          # An empty changeset still has an anchor line.
-          emit empty dcm_emit_plan_summary "$SANDBOX/empty.txt"
-          assert_missing "$COMMENT_FILE" '❯ Step 4/4' 'progress is filtered for an empty changeset too'
-          assert_contains "$COMMENT_FILE" 'No changes detected.' 'the empty-changeset line must be kept'
-          echo 'PASS: an empty changeset keeps its summary line'
-
-          # The generic library filters nothing unless a caller sets an anchor.
+          # The generic library filters nothing unless a caller sets a pattern.
           STEP_FILE="$SANDBOX/generic.step.md"
           COMMENT_FILE="$SANDBOX/generic.comment.md"
           : > "$STEP_FILE"
@@ -326,11 +327,11 @@ jobs:
             . "$WORKSPACE/scripts/gh-actions-lib.sh"
             gha_emit_summary success "Generic command" "$SANDBOX/released.txt"
           )
-          assert_contains "$COMMENT_FILE" '❯ Step 1/5' 'gh-actions-lib alone must not filter anything'
-          echo 'PASS: filtering is opt-in through GHA_COMMENT_ANCHOR_REGEX'
+          assert_contains "$COMMENT_FILE" 'UPLOAD - ⠋ Running...' 'gh-actions-lib alone must not filter anything'
+          echo 'PASS: filtering is opt-in through GHA_COMMENT_DROP_REGEX'
 
           # Every case above must leave the job summary at least as complete as the comment.
-          for name in released redesigned failed empty; do
+          for name in released redesigned failed; do
             step_lines=$(wc -l < "$SANDBOX/$name.step.md")
             comment_lines=$(wc -l < "$SANDBOX/$name.comment.md")
             if [ "$step_lines" -lt "$comment_lines" ]; then

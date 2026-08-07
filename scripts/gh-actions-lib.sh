@@ -24,37 +24,29 @@ gha_summary_line_step_only() {
   printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
 }
 
-# Arm the anchor filter for one command-output block.
-#
-# When GHA_COMMENT_ANCHOR_REGEX is set and the output file contains a line
-# matching it, gha_summary_output_line sends every line before that first match
-# to the step summary only. Progress and other preamble stay in the job summary
-# and the Actions log while the PR comment starts at the payload. When no line
-# matches, the filter stays off so nothing is dropped.
-# Usage: gha_arm_anchor_filter <output-file>
-gha_arm_anchor_filter() {
-  local output_file="$1"
-  _GHA_ANCHOR_ACTIVE=0
-  _GHA_ANCHOR_SEEN=0
-  if [ -n "${GHA_COMMENT_ANCHOR_REGEX:-}" ] && [ -s "$output_file" ]; then
-    if grep -Eq "$GHA_COMMENT_ANCHOR_REGEX" "$output_file"; then
-      _GHA_ANCHOR_ACTIVE=1
-    fi
+# Arm the output filter for one command-output block.
+# Usage: gha_arm_comment_filter <output-file>
+gha_arm_comment_filter() {
+  _GHA_FILTER_ACTIVE=0
+  if [ -n "${GHA_COMMENT_DROP_REGEX:-}" ] && [ -s "$1" ]; then
+    _GHA_FILTER_ACTIVE=1
   fi
 }
 
-# Write one line of captured command output, honouring the anchor filter.
+# Write one line of captured command output.
+#
+# When GHA_COMMENT_DROP_REGEX is set, lines matching it go to the step summary
+# only. It is meant for transient lines that a live progress renderer repaints,
+# which carry no information once the run has finished. Everything else, including
+# completed and failed step lines, reaches both channels.
+#
 # Usage: gha_summary_output_line <text> [raw-line-for-matching]
 # Pass the raw line when <text> carries a prefix (e.g. a status emoji) that would
-# otherwise keep the anchor from matching.
+# otherwise change how the pattern matches.
 gha_summary_output_line() {
-  if [ "${_GHA_ANCHOR_ACTIVE:-0}" = "1" ] && [ "${_GHA_ANCHOR_SEEN:-0}" = "0" ]; then
-    if [[ ${2-$1} =~ $GHA_COMMENT_ANCHOR_REGEX ]]; then
-      _GHA_ANCHOR_SEEN=1
-    else
-      gha_summary_line_step_only "$1"
-      return
-    fi
+  if [ "${_GHA_FILTER_ACTIVE:-0}" = "1" ] && [[ ${2-$1} =~ $GHA_COMMENT_DROP_REGEX ]]; then
+    gha_summary_line_step_only "$1"
+    return
   fi
   gha_summary_line "$1"
 }
@@ -76,7 +68,7 @@ gha_emit_summary() {
 
   gha_summary_line '```'
   if [ -s "$output_file" ]; then
-    gha_arm_anchor_filter "$output_file"
+    gha_arm_comment_filter "$output_file"
     while IFS= read -r line; do
       gha_summary_output_line "$line"
     done < "$output_file"

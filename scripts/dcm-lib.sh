@@ -12,13 +12,15 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/gh-actions-lib.sh"
 
-# Where the PR-comment copy of a plan/deploy output should start. The CLI prints
-# per-step progress lines before the changeset; those belong in the job summary
-# and the Actions log, not in the PR comment. Anchoring on the changeset rows and
-# the closing summary line keeps this independent of the progress format, which
-# has changed between CLI releases.
-: "${GHA_COMMENT_ANCHOR_REGEX:=^(CREATE|ALTER|DROP|Planned |Deployed |Purged |No changes detected)}"
-export GHA_COMMENT_ANCHOR_REGEX
+# Lines the PR-comment copy of a plan/deploy output leaves out. The CLI's live
+# progress renderer repaints a step while it runs, so in a non-interactive log each
+# step appears twice: once as "Running..." and again as the completed or failed
+# line. Only the transient repaint is dropped; the completed and failed step lines
+# and their detail lines stay in the comment. The second alternation covers the
+# spinner-only rows the newer progress layout prints for a running step. Anchoring
+# on the end of the line keeps object text that mentions "Running..." intact.
+: "${GHA_COMMENT_DROP_REGEX:=(Running\.\.\.|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)[[:space:]]*$}"
+export GHA_COMMENT_DROP_REGEX
 
 # Read a scalar value from manifest.yml.
 # Usage: dcm_manifest_value <yq-path> [manifest-path]
@@ -84,7 +86,7 @@ dcm_emit_plan_summary() {
 
   gha_summary_line '```'
   if [ -s "$output_file" ]; then
-    gha_arm_anchor_filter "$output_file"
+    gha_arm_comment_filter "$output_file"
     while IFS= read -r line; do
       case "$line" in
         CREATE\ *) gha_summary_output_line "🟩 $line" "$line" ;;
