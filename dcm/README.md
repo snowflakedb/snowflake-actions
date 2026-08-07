@@ -78,8 +78,9 @@ permissions:
 ## Step summaries and PR comments
 
 `dcm-plan` and `dcm-deploy` both write the captured CLI output to the GitHub Step
-Summary, and post it as a pull request comment when `comment-on-pr: "true"`. The
-two views are shaped differently.
+Summary, and post the same content as a pull request comment when
+`comment-on-pr: "true"`. The two views are byte-identical; only the size limit
+described below applies to the comment alone.
 
 **What both views leave out.** The CLI renders per-step progress live, so in a
 non-interactive log every step is printed twice: once as `Running...` while it is
@@ -89,12 +90,10 @@ file tree are kept, as is any changeset row whose object text happens to mention
 `Running...`. The raw Actions log is written straight from the CLI and keeps
 everything, so step timings remain available when a step hangs.
 
-**Step summary.** One fenced block per section, in the order the CLI produced it.
-
-**PR comment.** The changeset rows move into their own section, whose summary line
-reads `collapse/expand` to signal that it is interactive. The comment therefore
-opens on the processing steps, the changeset and the closing totals line (`Planned
-416 entities (...)` or `Deployed 2 entities (...)`):
+**The changeset sits in a collapsible section**, whose summary line reads
+`collapse/expand` to signal that it is interactive. The processing steps stay above
+it and the closing totals line (`Planned 416 entities (...)` or `Deployed 2 entities
+(...)`) below it, so the outcome is readable whether or not the section is expanded:
 
 ````markdown
 ### ✅ DCM Plan to DCM_DEV successful
@@ -118,15 +117,15 @@ Planned 2 entities (0 to create, 2 to alter, 0 to drop).
 ````
 
 **Plan expands the section, deploy collapses it.** Both actions render the changeset
-identically, including the colour coding. The plan comment is where a reviewer reads
-what will change, so its section is open on load. By the time the deploy comment is
+identically, including the colour coding. The plan output is where a reviewer reads
+what will change, so its section is open on load. By the time the deploy output is
 read those same rows have been reviewed already, so its section starts collapsed and
 the outcome line leads. Either can be toggled by the reader.
 
 Changeset rows are colour-coded so the change type is visible at a glance: 🟩 `CREATE`,
 🟨 `ALTER`, 🟥 `DROP`. Emoji is used because GitHub strips HTML and CSS from comment
-bodies. A failure before any changeset, and a plan with no changes, have no rows to
-move and are left flat.
+bodies. Output with no changeset rows, such as a failure before the plan ran or a plan
+with no changes, is emitted as one flat block with no section.
 
 **One comment per target and project.** Each comment carries a hidden marker built
 from the action, the target and the project name, so a later run updates the
@@ -135,8 +134,10 @@ targets or projects in the same pull request, keep separate comments.
 
 **Size limit.** GitHub rejects comment bodies longer than 65536 characters, which a
 plan of a few hundred entities can exceed. A body over the limit is truncated at a
-line boundary, with a notice pointing at the run log and the uploaded artifact. The
-step summary is not subject to this limit and keeps the full output.
+line boundary, closing the changeset section if the cut landed inside it, with a
+notice pointing at the run log and the uploaded artifact. This is the one difference
+between the two views: the step summary is not subject to the limit and keeps the
+full output.
 
 ---
 

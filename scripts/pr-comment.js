@@ -58,94 +58,6 @@ function assembleBody(prefix, content, footer) {
   return prefix + kept + notice + footer;
 }
 
-// Restructure the PR-comment copy of a captured command output.
-//
-// The region from the first line matching COMMENT_FOLD_START_REGEX up to the first
-// line matching COMMENT_FOLD_END_REGEX is moved into a <details> section labelled
-// COMMENT_FOLD_LABEL, expanded by default so it stays discoverable. Only fenced
-// blocks are touched, and only the block that contains the fold start, so
-// surrounding sections are left alone. Without COMMENT_FOLD_START_REGEX the content
-// is returned unchanged, which keeps this file free of project-specific patterns.
-function renderCommentBody(content) {
-  // Unicode mode, so a character class can hold emoji: without it a class like
-  // [🟩🟨🟥] matches a single surrogate half and never the emoji itself.
-  const pattern = (name) => (process.env[name] ? new RegExp(process.env[name], 'u') : null);
-  const foldStart = pattern('COMMENT_FOLD_START_REGEX');
-  const foldEnd = pattern('COMMENT_FOLD_END_REGEX');
-  const label = process.env.COMMENT_FOLD_LABEL || 'Details';
-  // Expanded unless the caller asks otherwise, so the section stays discoverable.
-  const openAttribute = process.env.COMMENT_FOLD_OPEN === 'false' ? '' : ' open';
-
-  if (!foldStart) {
-    return content;
-  }
-
-  const trimBlank = (lines) => {
-    let start = 0;
-    let end = lines.length;
-    while (start < end && lines[start].trim() === '') start++;
-    while (end > start && lines[end - 1].trim() === '') end--;
-    return lines.slice(start, end);
-  };
-
-  const renderBlock = (kept) => {
-    const startIndex = kept.findIndex(l => foldStart.test(l));
-    if (startIndex === -1) {
-      return ['```', ...kept, '```'];
-    }
-
-    let endIndex = kept.length;
-    if (foldEnd) {
-      const offset = kept.slice(startIndex).findIndex(l => foldEnd.test(l));
-      if (offset !== -1) {
-        endIndex = startIndex + offset;
-      }
-    }
-
-    const head = trimBlank(kept.slice(0, startIndex));
-    const folded = trimBlank(kept.slice(startIndex, endIndex));
-    const tail = trimBlank(kept.slice(endIndex));
-
-    const rendered = [];
-    if (head.length) {
-      rendered.push('```', ...head, '```', '');
-    }
-    // Expanded by default, so the section is visible without a click; the reader
-    // can fold it away when it runs long. A caller whose reader has already seen
-    // the same rows elsewhere can start it collapsed via COMMENT_FOLD_OPEN=false.
-    rendered.push(`<details${openAttribute}><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
-    if (tail.length) {
-      rendered.push('', '```', ...tail, '```');
-    }
-    return rendered;
-  };
-
-  const out = [];
-  let block = null;
-  for (const line of content.split('\n')) {
-    if (line.trim() === '```') {
-      if (block === null) {
-        block = [];
-      } else {
-        out.push(...renderBlock(block));
-        block = null;
-      }
-      continue;
-    }
-    if (block === null) {
-      out.push(line);
-    } else {
-      block.push(line);
-    }
-  }
-  // An unterminated fence is left exactly as it was read.
-  if (block !== null) {
-    out.push('```', ...block);
-  }
-
-  return out.join('\n');
-}
-
 // Resolve the PR number associated with the current event/commit, or null.
 async function resolvePrNumber(github, context) {
   if (context.eventName === 'pull_request') {
@@ -202,7 +114,7 @@ async function postSummaryComment(github, context, summaryFile, fallback, marker
   const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
   const footer = `\n[🔎 View Full Run Details](${runUrl})\n`;
 
-  const body = assembleBody(prefix, renderCommentBody(content), footer);
+  const body = assembleBody(prefix, content, footer);
 
   if (markerTag) {
     const { data: comments } = await github.rest.issues.listComments({
