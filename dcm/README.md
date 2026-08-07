@@ -75,6 +75,64 @@ permissions:
 
 ---
 
+## Step summaries and PR comments
+
+`dcm-plan` and `dcm-deploy` both write the captured CLI output to the GitHub Step
+Summary, and post it as a pull request comment when `comment-on-pr: "true"`. The
+two views are shaped differently.
+
+**What both views leave out.** The CLI renders per-step progress live, so in a
+non-interactive log every step is printed twice: once as `Running...` while it is
+in flight, and again as its completed or failed line. Only the transient repaint
+is dropped. Completed and failed step lines, their detail lines and the uploaded
+file tree are kept, as is any changeset row whose object text happens to mention
+`Running...`. The raw Actions log is written straight from the CLI and keeps
+everything, so step timings remain available when a step hangs.
+
+**Step summary.** One fenced block per section, in the order the CLI produced it.
+
+**PR comment.** The changeset rows move into a collapsed `Changeset` section, so
+the comment opens on the processing steps and ends with the closing totals line
+(`Planned 416 entities (...)` or `Deployed 2 entities (...)`) without expanding:
+
+````markdown
+### ✅ DCM Deploy to DCM_DEV successful
+```
+❯ Step 1/5 - UPLOAD - ✓ Completed (1s)
+❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
+```
+
+<details><summary>Changeset</summary>
+
+```
+🟨 ALTER    DATABASE    DCM_ENV_DEMO_VAR
+└─ changed COMMENT: Build 5 → Build 6
+```
+
+</details>
+
+```
+Deployed 2 entities (0 created, 2 altered, 0 dropped).
+```
+````
+
+Plan changeset rows are colour-coded so the change type is visible at a glance:
+🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`. Emoji is used because GitHub strips HTML and CSS
+from comment bodies. A failure before any changeset, and a plan with no changes,
+have nothing to fold and are left flat.
+
+**One comment per target and project.** Each comment carries a hidden marker built
+from the action, the target and the project name, so a later run updates the
+comment it wrote before instead of adding another. Plans and deploys, and different
+targets or projects in the same pull request, keep separate comments.
+
+**Size limit.** GitHub rejects comment bodies longer than 65536 characters, which a
+plan of a few hundred entities can exceed. A body over the limit is truncated at a
+line boundary, with a notice pointing at the run log and the uploaded artifact. The
+step summary is not subject to this limit and keeps the full output.
+
+---
+
 ## dcm-parse-manifest
 
 Reads a DCM `manifest.yml` and outputs the list of target names as a JSON array, ready to feed into a GitHub Actions matrix strategy. This is useful for dynamically running jobs across all targets without hardcoding them.
@@ -160,9 +218,7 @@ Tests the Snowflake connection for a target, validates that the connection role 
 
 ## dcm-plan
 
-Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step Summary, and uploads the plan result as an artifact.
-
-The summary (and PR comment, when enabled) includes a color-coded list of the planned operations parsed from `plan_result.json`, using colored squares so the change type is clearly visible in the PR comment expander: 🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`.
+Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step Summary, and uploads the plan result as an artifact. See [Step summaries and PR comments](#step-summaries-and-pr-comments) for what the summary and the comment contain.
 
 Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-use#plan-only-changed-definitions-plan-delta), which evaluates only the definitions changed since the last deployment plus any definitions that depend on them. This is faster for incremental changes, but because it skips unchanged definitions it does not detect changes made outside DCM Projects since the last deployment. Run a full plan before deploying. When `plan-delta` is enabled, the summary includes a note that the plan was partial.
 
@@ -183,7 +239,7 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `create-if-not-exists` | no | `true` | Run `snow dcm create --if-not-exists` before planning |
-| `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR. One comment per target and project is updated in place across runs, so a new commit refreshes the existing comment. The comment opens on the processing steps and the closing totals, with the changeset rows in a collapsed `Changeset` section. The CLI's transient `Running...` progress lines are left out of the summary and the comment; the raw Actions log keeps them. Anything beyond GitHub's 65536-character comment limit is truncated with a pointer to the run log and the uploaded artifact. |
+| `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR. See [Step summaries and PR comments](#step-summaries-and-pr-comments) |
 | `plan-delta` | no | `false` | Run `snow dcm plan --delta` instead of a full plan |
 
 ### Outputs
@@ -205,6 +261,8 @@ The `dcm-plan` action **must** run before this action in the same job -- it prod
 
 The deployment alias passed to `snow dcm deploy --alias` is set automatically to the source branch of the associated pull request (resolved from `pull_request` events directly, or via the merge commit on `push` events). When no PR branch can be found, no alias is passed.
 
+The deploy output is written to the GitHub Step Summary and, when enabled, posted as a PR comment. See [Step summaries and PR comments](#step-summaries-and-pr-comments).
+
 ```yaml
 - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
   with:
@@ -223,7 +281,7 @@ The deployment alias passed to `snow dcm deploy --alias` is set automatically to
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `allow-drops` | no | `false` | Set to `true` to skip destructive drop detection |
-| `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR. One comment per target and project is updated in place across runs. The comment opens on the processing steps and the closing totals, with the changeset rows in a collapsed `Changeset` section. The CLI's transient `Running...` progress lines are left out of the summary and the comment; the raw Actions log keeps them. Anything beyond GitHub's 65536-character comment limit is truncated with a pointer to the run log. |
+| `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR. See [Step summaries and PR comments](#step-summaries-and-pr-comments) |
 | `post-scripts-path` | no | `""` | Relative path (from project-path) to a directory of `.sql` files to run after deploy. Files are executed alphabetically with Jinja templating using manifest variables. |
 
 ### Outputs
