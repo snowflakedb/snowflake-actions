@@ -24,7 +24,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: snowflakedb/snowflake-actions@v3
         with:
@@ -204,7 +204,7 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: snowflakedb/snowflake-actions@v3
         with:
@@ -259,7 +259,7 @@ jobs:
     env:
       SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
         with:
