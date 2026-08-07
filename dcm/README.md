@@ -91,10 +91,11 @@ everything, so step timings remain available when a step hangs.
 
 **Step summary.** One fenced block per section, in the order the CLI produced it.
 
-**PR comment.** The changeset rows move into their own `Changeset` section, expanded
-by default so it stays discoverable, and collapsible when the list runs long. The
-comment therefore opens on the processing steps, the changeset and the closing
-totals line (`Planned 416 entities (...)` or `Deployed 2 entities (...)`):
+**PR comment.** The changeset rows move into their own section, expanded by default so
+it stays discoverable, and collapsible when the list runs long. The summary line reads
+`collapse/expand` to signal that it is interactive. The comment therefore opens on the
+processing steps, the changeset and the closing totals line (`Planned 416 entities
+(...)` or `Deployed 2 entities (...)`):
 
 ````markdown
 ### ✅ DCM Deploy to DCM_DEV successful
@@ -103,7 +104,7 @@ totals line (`Planned 416 entities (...)` or `Deployed 2 entities (...)`):
 ❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
 ```
 
-<details open><summary>Changeset</summary>
+<details open><summary>collapse/expand</summary>
 
 ```
 🟨 ALTER    DATABASE    DCM_ENV_DEMO_VAR

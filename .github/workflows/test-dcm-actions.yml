@@ -243,7 +243,7 @@ jobs:
             }
             process.env.COMMENT_FOLD_START_REGEX = '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\\s';
             process.env.COMMENT_FOLD_END_REGEX = '^(?:Planned|Deployed|Purged|No changes detected)';
-            process.env.COMMENT_FOLD_LABEL = 'Changeset';
+            process.env.COMMENT_FOLD_LABEL = 'collapse/expand';
           }
 
           function stubGithub(seed = []) {
@@ -287,7 +287,7 @@ jobs:
               await postSummaryComment(github, prContext, summaryFile('fold.md', planSummary(3)), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
 
-              assert.ok(body.includes('<details open><summary>Changeset</summary>'),
+              assert.ok(body.includes('<details open><summary>collapse/expand</summary>'),
                 'the changeset sits in a section that is expanded by default');
               assert.ok(body.includes('</details>'), 'the fold is closed');
 

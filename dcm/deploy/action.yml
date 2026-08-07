@@ -278,7 +278,7 @@ runs:
         # steps and the closing totals.
         COMMENT_FOLD_START_REGEX: '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\s'
         COMMENT_FOLD_END_REGEX: '^(?:Planned|Deployed|Purged|No changes detected)'
-        COMMENT_FOLD_LABEL: "Changeset"
+        COMMENT_FOLD_LABEL: "collapse/expand"
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
