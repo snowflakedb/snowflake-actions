@@ -17,19 +17,19 @@ permissions:
   contents: read
 
 jobs:
-  unit-test-pr-comment-size:
-    name: Unit test pr-comment.js size limiting
+  unit-test-pr-comment:
+    name: Unit test pr-comment.js
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: "Test: PR comments stay within GitHub's size limit"
+      - name: "Test: comments stay within the size limit and update in place"
         shell: bash
         run: |
           set -e
-          HARNESS="${RUNNER_TEMP}/pr-comment-size.test.js"
+          HARNESS="${RUNNER_TEMP}/pr-comment.test.js"
           cat > "$HARNESS" <<'JS'
           // Behaviour tests for postSummaryComment: size limiting and in-place updates.
           const assert = require('node:assert');
@@ -85,6 +85,7 @@ jobs:
 
           const prContext = { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId: 42 };
           const only = (github) => [...github.store.values()][0];
+          const bodies = (github) => [...github.store.values()].map(c => c.body);
 
           async function main() {
 
@@ -157,212 +158,28 @@ jobs:
               assert.equal(github.calls.updated, 0, 'nothing is updated when no PR is associated');
               console.log('PASS: a commit with no associated PR is skipped');
             }
-          }
 
-          main().catch((err) => {
-            console.error(`FAIL: ${err.message}`);
-            process.exit(1);
-          });
-          JS
-          node "$HARNESS"
-
-  unit-test-pr-comment-history:
-    name: Unit test pr-comment.js plan history
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: "Test: earlier plans are collapsed, the latest stays expanded"
-        shell: bash
-        run: |
-          set -e
-          HARNESS="${RUNNER_TEMP}/pr-comment-history.test.js"
-          cat > "$HARNESS" <<'JS'
-          // Behaviour tests for postVersionedSummaryComment: one comment per run, with the
-          // comments of earlier runs collapsed so only the latest plan is expanded.
-          const assert = require('node:assert');
-          const fs = require('fs');
-          const os = require('os');
-          const path = require('path');
-
-          const { postVersionedSummaryComment } = require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
-
-          const LIMIT = 65536;
-          const FENCE = '```';
-          const FAMILY = 'dcm-plan:PREPROD:proj';
-          const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prhistory-'));
-
-          function summaryFile(name, rowCount, target = 'PREPROD') {
-            const lines = [`### ✅ DCM Plan to ${target} successful`, FENCE];
-            for (let i = 0; i < rowCount; i++) {
-              lines.push(`CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_${i}`);
-            }
-            lines.push(FENCE);
-            const file = path.join(tmp, name);
-            fs.writeFileSync(file, lines.join('\n') + '\n');
-            return file;
-          }
-
-          function stubGithub(seed = []) {
-            const store = new Map(seed.map(c => [c.id, { ...c }]));
-            let nextId = 500;
-            const calls = { created: 0, updated: 0 };
-            return {
-              store,
-              calls,
-              paginate: async () => [...store.values()],
-              rest: {
-                issues: {
-                  listComments: async () => ({ data: [...store.values()] }),
-                  createComment: async (p) => {
-                    calls.created++;
-                    const id = nextId++;
-                    store.set(id, { id, body: p.body });
-                  },
-                  updateComment: async (p) => {
-                    calls.updated++;
-                    store.get(p.comment_id).body = p.body;
-                  },
-                },
-                repos: {
-                  listPullRequestsAssociatedWithCommit: async () => ({ data: [] }),
-                },
-              },
-            };
-          }
-
-          // Each workflow run gets its own context; a re-run reuses runId with a new attempt.
-          function contextFor(runId, attempt = 1) {
-            process.env.GITHUB_RUN_ATTEMPT = String(attempt);
-            return { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId };
-          }
-
-          const bodies = (github) => [...github.store.values()].map(c => c.body);
-          const expanded = (github) => bodies(github).filter(b => b.includes(FAMILY) && !b.includes('<details>'));
-          const collapsed = (github) => bodies(github).filter(b => b.includes(FAMILY) && b.includes('<details>'));
-
-          async function main() {
-            // A run on a PR with no prior comment posts one comment carrying its run reference.
+            // Plan and deploy, and each target and project, keep their own comment.
             {
               const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(11), summaryFile('r11.md', 3), 'fallback', FAMILY);
-              assert.equal(github.store.size, 1, 'one comment per run');
-              assert.ok(bodies(github)[0].startsWith(`<!-- ${FAMILY} run:11.1 -->\n`), 'marker carries run id and attempt');
-              assert.ok(!bodies(github)[0].includes('<details>'), 'the latest plan is expanded');
-              console.log('PASS: the first run posts a single expanded comment');
-            }
-
-            // The next run adds its own comment and folds the previous one away.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(11), summaryFile('a.md', 3), 'fallback', FAMILY);
-              await postVersionedSummaryComment(github, contextFor(12), summaryFile('b.md', 4), 'fallback', FAMILY);
-              assert.equal(github.store.size, 2, 'history accumulates one comment per run');
-              assert.equal(expanded(github).length, 1, 'exactly one comment stays expanded');
-              assert.equal(collapsed(github).length, 1, 'the earlier run is collapsed');
-              assert.ok(expanded(github)[0].includes('run:12.1'), 'the newest run is the expanded one');
-
-              const old = collapsed(github)[0];
-              assert.ok(old.startsWith(`<!-- ${FAMILY} run:11.1 -->\n<details>`), 'the marker is kept above the fold');
-              assert.ok(old.includes('<summary>✅ DCM Plan to PREPROD successful · run 11</summary>'),
-                'the heading becomes the summary line, so status and target show while collapsed');
-              assert.ok(old.includes('CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_2'), 'the collapsed output is retained in full');
-              assert.ok(old.trimEnd().endsWith('</details>'), 'the details block is closed');
-              console.log('PASS: a later run collapses the earlier one and stays expanded itself');
-            }
-
-            // Re-running the same attempt must refresh that run's comment, not duplicate it.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(12), summaryFile('c.md', 2), 'fallback', FAMILY);
-              await postVersionedSummaryComment(github, contextFor(12), summaryFile('c.md', 2), 'fallback', FAMILY);
-              assert.equal(github.store.size, 1, 'the same run does not stack a second comment');
-              assert.equal(github.calls.updated, 1, 'the run updates its own comment');
-              assert.ok(!bodies(github)[0].includes('<details>'), 'its comment stays expanded');
-              console.log('PASS: re-running the same attempt updates that run in place');
-            }
-
-            // A re-run of the workflow is a new version and gets its own labelled comment.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(12, 1), summaryFile('d.md', 2), 'fallback', FAMILY);
-              await postVersionedSummaryComment(github, contextFor(12, 2), summaryFile('e.md', 2), 'fallback', FAMILY);
-              assert.equal(github.store.size, 2, 'a second attempt is a separate version');
-              assert.ok(collapsed(github)[0].includes('· run 12</summary>'),
-                'the first attempt is labelled by run alone');
-              assert.ok(expanded(github)[0].includes('run:12.2'), 'the second attempt is the expanded one');
-
-              await postVersionedSummaryComment(github, contextFor(12, 3), summaryFile('e2.md', 2), 'fallback', FAMILY);
-              assert.ok(collapsed(github).some(b => b.includes('· run 12 (attempt 2)</summary>')),
-                'later attempts are named so two folds of the same run stay distinguishable');
-              console.log('PASS: a re-run is kept as its own version, labelled by attempt');
-            }
-
-            // A sticky comment from an earlier version of the action carries no run reference.
-            {
-              const github = stubGithub([{
-                id: 1,
-                body: `<!-- ${FAMILY} -->\n### ✅ DCM Plan to PREPROD successful\n${FENCE}\nCREATE TABLE MYDB.MYSCHEMA.OLD\n${FENCE}\n\n[🔎 View Full Run Details](https://github.com/o/r/actions/runs/9)\n`,
-              }]);
-              await postVersionedSummaryComment(github, contextFor(13), summaryFile('f.md', 2), 'fallback', FAMILY);
-              const legacy = github.store.get(1).body;
-              assert.ok(legacy.includes('<details>'), 'a legacy sticky comment is collapsed too');
-              assert.ok(legacy.includes('<summary>✅ DCM Plan to PREPROD successful</summary>'),
-                'with no run reference to add, the heading alone is the summary line');
-              assert.equal(expanded(github).length, 1, 'only the new run is left expanded');
-              console.log('PASS: a sticky comment from an earlier action version is collapsed');
-            }
-
-            // Collapsing is idempotent: an already-folded comment is left untouched.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(11), summaryFile('g.md', 2), 'fallback', FAMILY);
-              await postVersionedSummaryComment(github, contextFor(12), summaryFile('h.md', 2), 'fallback', FAMILY);
-              const afterFirstFold = github.store.get(500).body;
-              await postVersionedSummaryComment(github, contextFor(13), summaryFile('i.md', 2), 'fallback', FAMILY);
-              assert.equal(github.store.get(500).body, afterFirstFold, 'a collapsed comment is not rewritten again');
-              assert.equal(collapsed(github).length, 2, 'both earlier runs stay collapsed');
-              console.log('PASS: comments already collapsed are not rewritten');
-            }
-
-            // Another target keeps its own history and is never folded by this one.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(11), summaryFile('j.md', 2, 'PROD'), 'fallback', 'dcm-plan:PROD:proj');
-              await postVersionedSummaryComment(github, contextFor(12), summaryFile('k.md', 2), 'fallback', FAMILY);
-              const prod = bodies(github).find(b => b.includes('dcm-plan:PROD:proj'));
-              assert.ok(!prod.includes('<details>'), 'a different target is left expanded');
-              console.log('PASS: each target keeps a separate comment history');
-            }
-
-            // Size limiting applies to posting and to folding, so history never breaks the job.
-            {
-              const github = stubGithub();
-              await postVersionedSummaryComment(github, contextFor(14), summaryFile('big1.md', 5000), 'fallback', FAMILY);
-              await postVersionedSummaryComment(github, contextFor(15), summaryFile('big2.md', 5000), 'fallback', FAMILY);
-              for (const body of bodies(github)) {
-                assert.ok(body.length <= LIMIT, `every comment must fit the limit, got ${body.length}`);
-                assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'code fences stay balanced');
+              for (const marker of [
+                'dcm-plan:PREPROD:proj-a',
+                'dcm-plan:PROD:proj-a',
+                'dcm-plan:PREPROD:proj-b',
+                'dcm-deploy:PREPROD:proj-a',
+              ]) {
+                await postSummaryComment(github, prContext, summaryFile('multi.md', 2), 'fallback', marker);
               }
-              const old = collapsed(github)[0];
-              assert.ok(old.includes('Output truncated'), 'a truncated fold discloses it');
-              assert.ok(old.trimEnd().endsWith('</details>'), 'the details block is closed after truncation');
-              const summaryLine = old.split('\n').findIndex(l => l.startsWith('<details>'));
-              const linkLine = old.split('\n').findIndex(l => l.includes('/actions/runs/14)'));
-              assert.ok(linkLine > summaryLine && linkLine < summaryLine + 4,
-                'the run link sits directly under the summary line so truncation cannot cut it');
-              console.log('PASS: oversized plans are truncated when posted and when collapsed');
-            }
+              assert.equal(github.store.size, 4, 'each kind, target and project gets its own comment');
 
-            // Without an associated PR there is nothing to comment on.
-            {
-              const github = stubGithub();
-              const pushContext = { eventName: 'push', repo: { owner: 'o', repo: 'r' }, runId: 42, sha: 'deadbeef' };
-              await postVersionedSummaryComment(github, pushContext, summaryFile('l.md', 2), 'fallback', FAMILY);
-              assert.equal(github.store.size, 0, 'nothing is posted when no PR is associated');
-              console.log('PASS: a commit with no associated PR is skipped');
+              // A second run of one of them updates only that comment.
+              fs.writeFileSync(path.join(tmp, 'multi.md'), '### ✅ second run\n');
+              await postSummaryComment(github, prContext, path.join(tmp, 'multi.md'), 'fallback', 'dcm-plan:PROD:proj-a');
+              assert.equal(github.store.size, 4, 'no extra comment is created on the second run');
+              const updated = bodies(github).filter(b => b.includes('second run'));
+              assert.equal(updated.length, 1, 'only the matching comment is rewritten');
+              assert.ok(updated[0].includes('<!-- dcm-plan:PROD:proj-a -->'), 'the rewritten comment is the matching one');
+              console.log('PASS: comments for other targets, projects and kinds are left alone');
             }
           }
 
