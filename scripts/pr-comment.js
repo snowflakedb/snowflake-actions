@@ -49,7 +49,7 @@ function assembleBody(prefix, content, footer) {
   }
 
   // Same for a <details> block the cut landed inside.
-  const opened = (kept.match(/<details>/g) || []).length;
+  const opened = (kept.match(/<details\b/g) || []).length;
   const closed = (kept.match(/<\/details>/g) || []).length;
   if (opened > closed) {
     kept += detailsClose;
@@ -61,11 +61,11 @@ function assembleBody(prefix, content, footer) {
 // Restructure the PR-comment copy of a captured command output.
 //
 // The region from the first line matching COMMENT_FOLD_START_REGEX up to the first
-// line matching COMMENT_FOLD_END_REGEX is moved into a collapsed <details>
-// labelled COMMENT_FOLD_LABEL. Only fenced blocks are touched, and only the block
-// that contains the fold start, so surrounding sections are left alone. Without
-// COMMENT_FOLD_START_REGEX the content is returned unchanged, which keeps this file
-// free of project-specific patterns.
+// line matching COMMENT_FOLD_END_REGEX is moved into a <details> section labelled
+// COMMENT_FOLD_LABEL, expanded by default so it stays discoverable. Only fenced
+// blocks are touched, and only the block that contains the fold start, so
+// surrounding sections are left alone. Without COMMENT_FOLD_START_REGEX the content
+// is returned unchanged, which keeps this file free of project-specific patterns.
 function renderCommentBody(content) {
   // Unicode mode, so a character class can hold emoji: without it a class like
   // [🟩🟨🟥] matches a single surrogate half and never the emoji itself.
@@ -108,7 +108,9 @@ function renderCommentBody(content) {
     if (head.length) {
       rendered.push('```', ...head, '```', '');
     }
-    rendered.push(`<details><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
+    // Expanded by default, so the changeset is visible without a click; the
+    // reader can fold it away when it runs long.
+    rendered.push(`<details open><summary>${label}</summary>`, '', '```', ...folded, '```', '', '</details>');
     if (tail.length) {
       rendered.push('', '```', ...tail, '```');
     }

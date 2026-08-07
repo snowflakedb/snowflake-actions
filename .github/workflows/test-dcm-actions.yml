@@ -277,20 +277,21 @@ jobs:
           const prContext = { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId: 42 };
           const only = (github) => [...github.store.values()][0];
           const bodies = (github) => [...github.store.values()].map(c => c.body);
-          const inFoldOf = (body) => body.slice(body.indexOf('<details>'), body.indexOf('</details>'));
+          const inFoldOf = (body) => body.slice(body.indexOf('<details'), body.indexOf('</details>'));
 
           async function main() {
-            // The changeset is folded away while steps and totals stay visible.
+            // The changeset moves into its own section, expanded by default.
             {
               withFoldConfig(true);
               const github = stubGithub();
               await postSummaryComment(github, prContext, summaryFile('fold.md', planSummary(3)), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
 
-              assert.ok(body.includes('<details><summary>Changeset</summary>'), 'the changeset is folded under its label');
+              assert.ok(body.includes('<details open><summary>Changeset</summary>'),
+                'the changeset sits in a section that is expanded by default');
               assert.ok(body.includes('</details>'), 'the fold is closed');
 
-              const foldStart = body.indexOf('<details>');
+              const foldStart = body.indexOf('<details');
               const foldEnd = body.indexOf('</details>');
               const inFold = body.slice(foldStart, foldEnd);
               const beforeFold = body.slice(0, foldStart);
@@ -303,7 +304,7 @@ jobs:
               assert.ok(afterFold.includes('Planned 3 entities (3 to create, 0 to alter, 0 to drop).'), 'the totals line stays visible below the fold');
               assert.ok(afterFold.includes('Artifacts saved to: /home/runner/work/x/out'), 'trailing output stays visible');
               assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'every fenced block is closed');
-              console.log('PASS: the changeset is collapsed, steps and totals stay visible');
+              console.log('PASS: the changeset is in an expanded section, steps and totals stay visible');
             }
 
             // An empty changeset has no rows to fold, so nothing is folded.
@@ -313,7 +314,7 @@ jobs:
               const empty = `### ✅ DCM Plan to PREPROD successful\n${FENCE}\n❯ Step 4/4 - PLAN - ✓ Completed (2s)\nNo changes detected.\n${FENCE}\n`;
               await postSummaryComment(github, prContext, summaryFile('empty.md', empty), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
-              assert.ok(!body.includes('<details>'), 'with no changeset rows there is nothing to fold');
+              assert.ok(!body.includes('<details'), 'with no changeset rows there is nothing to fold');
               assert.ok(body.includes('No changes detected.'), 'the empty-changeset line is kept');
               console.log('PASS: an empty changeset is left unfolded');
             }
@@ -325,7 +326,7 @@ jobs:
               const failed = `### ❌ DCM Plan to PREPROD failed\n${FENCE}\n❯ Step 2/4 - RENDER - ✗ Failed (1s)\nError: could not render sources/definitions/a.sql\n${FENCE}\n`;
               await postSummaryComment(github, prContext, summaryFile('failed.md', failed), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
-              assert.ok(!body.includes('<details>'), 'a failure with no changeset is not folded');
+              assert.ok(!body.includes('<details'), 'a failure with no changeset is not folded');
               assert.ok(body.includes('❯ Step 2/4 - RENDER - ✗ Failed (1s)'), 'the failed step line is visible');
               assert.ok(body.includes('Error: could not render sources/definitions/a.sql'), 'the error is visible');
               console.log('PASS: a failure keeps its diagnostic visible');
@@ -353,7 +354,7 @@ jobs:
                 `### ✅ 2 of 2 post-scripts succeeded\n${FENCE}\n- 001_seed.sql\n- 002_grants.sql\n${FENCE}\n`;
               await postSummaryComment(github, prContext, summaryFile('guard.md', guarded), 'fallback', 'dcm-deploy:DEV:proj');
               const body = only(github).body;
-              assert.equal((body.match(/<details>/g) || []).length, 1, 'only the block holding the changeset is folded');
+              assert.equal((body.match(/<details\b/g) || []).length, 1, 'only the block holding the changeset is folded');
               assert.ok(body.includes('### ✅ PLAN contains no DROP DATABASE | SCHEMA | TABLE | STAGE commands'), 'the guard section is untouched');
               assert.ok(body.includes('- 001_seed.sql'), 'the post-scripts section is untouched');
               console.log('PASS: other sections of the summary are left alone');
@@ -366,7 +367,7 @@ jobs:
               const content = planSummary(2);
               await postSummaryComment(github, prContext, summaryFile('raw.md', content), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
-              assert.ok(!body.includes('<details>'), 'no restructuring without the COMMENT_* variables');
+              assert.ok(!body.includes('<details'), 'no restructuring without the COMMENT_* variables');
               assert.ok(body.includes('🟩 CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_0'), 'the changeset stays inline');
               console.log('PASS: restructuring is opt-in through the COMMENT_* variables');
             }
@@ -393,7 +394,7 @@ jobs:
               assert.ok(body.length <= LIMIT, `body must fit the limit, got ${body.length}`);
               assert.ok(body.includes('Output truncated'), 'truncation must be disclosed');
               assert.equal((body.match(/^```/gm) || []).length % 2, 0, 'code fences must stay balanced');
-              assert.equal((body.match(/<details>/g) || []).length, (body.match(/<\/details>/g) || []).length,
+              assert.equal((body.match(/<details\b/g) || []).length, (body.match(/<\/details>/g) || []).length,
                 'a fold cut by truncation is still closed');
               assert.ok(body.trimEnd().endsWith('/actions/runs/42)'), 'run link must survive truncation');
               console.log('PASS: an oversized changeset is truncated with the fold closed');

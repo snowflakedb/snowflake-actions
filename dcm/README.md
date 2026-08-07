@@ -91,9 +91,10 @@ everything, so step timings remain available when a step hangs.
 
 **Step summary.** One fenced block per section, in the order the CLI produced it.
 
-**PR comment.** The changeset rows move into a collapsed `Changeset` section, so
-the comment opens on the processing steps and ends with the closing totals line
-(`Planned 416 entities (...)` or `Deployed 2 entities (...)`) without expanding:
+**PR comment.** The changeset rows move into their own `Changeset` section, expanded
+by default so it stays discoverable, and collapsible when the list runs long. The
+comment therefore opens on the processing steps, the changeset and the closing
+totals line (`Planned 416 entities (...)` or `Deployed 2 entities (...)`):
 
 ````markdown
 ### ✅ DCM Deploy to DCM_DEV successful
@@ -102,7 +103,7 @@ the comment opens on the processing steps and ends with the closing totals line
 ❯ Step 5/5 - DEPLOY - ✓ Completed (2s)
 ```
 
-<details><summary>Changeset</summary>
+<details open><summary>Changeset</summary>
 
 ```
 🟨 ALTER    DATABASE    DCM_ENV_DEMO_VAR
@@ -119,7 +120,7 @@ Deployed 2 entities (0 created, 2 altered, 0 dropped).
 Plan changeset rows are colour-coded so the change type is visible at a glance:
 🟩 `CREATE`, 🟨 `ALTER`, 🟥 `DROP`. Emoji is used because GitHub strips HTML and CSS
 from comment bodies. A failure before any changeset, and a plan with no changes,
-have nothing to fold and are left flat.
+have no rows to move and are left flat.
 
 **One comment per target and project.** Each comment carries a hidden marker built
 from the action, the target and the project name, so a later run updates the
