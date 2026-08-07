@@ -167,7 +167,7 @@ jobs:
     outputs:
       targets: ${{ steps.manifest.outputs.targets }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: snowflakedb/snowflake-actions/dcm/parse-manifest@v3
         id: manifest
         with:
@@ -181,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # ... use other dcm actions with target: ${{ matrix.target }}
 ```
 
@@ -320,7 +320,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
         with:
@@ -352,7 +352,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:

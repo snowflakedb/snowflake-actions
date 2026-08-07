@@ -25,7 +25,7 @@
 #         id-token: write
 #         contents: read
 #       steps:
-#         - uses: actions/checkout@v5
+#         - uses: actions/checkout@v7
 #         - uses: snowflakedb/snowflake-actions/dcm/plan@v3
 #           with:
 #             target: DCM_STAGE
