@@ -60,23 +60,21 @@ function assembleBody(prefix, content, footer) {
 
 // Restructure the PR-comment copy of a captured command output.
 //
-// Lines matching COMMENT_DROP_REGEX are removed, and the region from the first
-// line matching COMMENT_FOLD_START_REGEX up to the first line matching
-// COMMENT_FOLD_END_REGEX is moved into a collapsed <details> labelled
-// COMMENT_FOLD_LABEL. Only fenced blocks are touched, and only the block that
-// contains the fold start, so surrounding sections are left alone. With none of
-// the variables set the content is returned unchanged, which keeps this file free
-// of project-specific patterns.
+// The region from the first line matching COMMENT_FOLD_START_REGEX up to the first
+// line matching COMMENT_FOLD_END_REGEX is moved into a collapsed <details>
+// labelled COMMENT_FOLD_LABEL. Only fenced blocks are touched, and only the block
+// that contains the fold start, so surrounding sections are left alone. Without
+// COMMENT_FOLD_START_REGEX the content is returned unchanged, which keeps this file
+// free of project-specific patterns.
 function renderCommentBody(content) {
   // Unicode mode, so a character class can hold emoji: without it a class like
   // [🟩🟨🟥] matches a single surrogate half and never the emoji itself.
   const pattern = (name) => (process.env[name] ? new RegExp(process.env[name], 'u') : null);
-  const dropPattern = pattern('COMMENT_DROP_REGEX');
   const foldStart = pattern('COMMENT_FOLD_START_REGEX');
   const foldEnd = pattern('COMMENT_FOLD_END_REGEX');
   const label = process.env.COMMENT_FOLD_LABEL || 'Details';
 
-  if (!dropPattern && !foldStart) {
+  if (!foldStart) {
     return content;
   }
 
@@ -88,9 +86,8 @@ function renderCommentBody(content) {
     return lines.slice(start, end);
   };
 
-  const renderBlock = (blockLines) => {
-    const kept = dropPattern ? blockLines.filter(l => !dropPattern.test(l)) : blockLines;
-    const startIndex = foldStart ? kept.findIndex(l => foldStart.test(l)) : -1;
+  const renderBlock = (kept) => {
+    const startIndex = kept.findIndex(l => foldStart.test(l));
     if (startIndex === -1) {
       return ['```', ...kept, '```'];
     }

@@ -17,6 +17,164 @@ permissions:
   contents: read
 
 jobs:
+  unit-test-summary-filter:
+    name: Unit test summary output filtering
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: transient progress repaints are left out of both summaries"
+        shell: bash
+        run: |
+          set -e
+          HARNESS="${RUNNER_TEMP}/summary-filter.test.sh"
+          cat > "$HARNESS" <<'SH'
+          #!/usr/bin/env bash
+          # Behaviour tests for the output filter in gh-actions-lib.sh and dcm-lib.sh: the
+          # CLI's transient progress repaints are left out of both the job summary and the
+          # PR-comment copy, while every completed or failed step line is kept.
+          set -euo pipefail
+
+          WORKSPACE="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
+          SANDBOX="$(mktemp -d)"
+
+          # Progress format of the released CLI: "❯ Step n/m - LABEL - verb".
+          cat > "$SANDBOX/released.txt" <<'EOF'
+          ❯ Step 1/5 - UPLOAD - ⠋ Running...
+            • Create temporary stage inside DCM_DEMO.PROJECTS
+            • Upload files
+              ├── manifest.yml
+              └── sources
+          ❯ Step 1/5 - UPLOAD - ✓ Completed (1s)
+          ❯ Step 2/5 - RENDER - ⠙ Running...
+          ❯ Step 2/5 - RENDER - ✓ Completed (3s)
+          ❯ Step 3/5 - COMPILE - ✓ Completed (0s)
+
+          ALTER    DATABASE    DCM_ENV_DEMO_VAR
+          └─ changed COMMENT: Build 5 → Build 6
+          ALTER    TASK        DCM_ENV_DEMO_VAR.PUBLIC.LOAD
+          └─ changed COMMENT: Running... nightly → Running... hourly
+
+          Deployed 2 entities (0 created, 2 altered, 0 dropped).
+          Artifacts saved to: /home/runner/work/x/out
+          EOF
+
+          # Progress format of a later CLI: "LABEL  ✓  (1.3s)", running steps spinner-only.
+          cat > "$SANDBOX/redesigned.txt" <<'EOF'
+          UPLOAD     ✓  (1.3s)
+            Creating temporary stage inside DCM_DEMO.PROJECTS.
+          RENDER     ✓  (3.0s)
+          PLAN       ⠋
+          PLAN       ✓  (2.0s)
+          CREATE   TABLE       MYDB.MYSCHEMA.T1
+          DROP     VIEW        MYDB.MYSCHEMA.V1
+          Planned 2 entities (1 to create, 0 to alter, 1 to drop).
+          EOF
+
+          # A failure during a step: the failed step line is the diagnostic and must stay.
+          cat > "$SANDBOX/failed.txt" <<'EOF'
+          ❯ Step 2/5 - RENDER - ⠋ Running...
+          ❯ Step 2/5 - RENDER - ✗ Failed (1s)
+          Error: could not render sources/definitions/a.sql
+          EOF
+
+          # Render one output file through an emitter, into a fresh pair of summary files.
+          emit() {
+            local name="$1" emitter="$2" output_file="$3"
+            STEP_FILE="$SANDBOX/$name.step.md"
+            COMMENT_FILE="$SANDBOX/$name.comment.md"
+            : > "$STEP_FILE"
+            : > "$COMMENT_FILE"
+            (
+              export GITHUB_STEP_SUMMARY="$STEP_FILE"
+              export GHA_SUMMARY_FILE="$COMMENT_FILE"
+              # shellcheck source=/dev/null
+              . "$WORKSPACE/scripts/dcm-lib.sh"
+              "$emitter" success "DCM run to DEV successful" "$output_file"
+            )
+          }
+
+          assert_contains() {
+            grep -qF -- "$2" "$1" || { echo "FAIL: $3"; echo "--- $1 ---"; cat "$1"; exit 1; }
+          }
+
+          assert_missing() {
+            if grep -qF -- "$2" "$1"; then
+              echo "FAIL: $3"
+              echo "--- $1 ---"
+              cat "$1"
+              exit 1
+            fi
+          }
+
+          # Deploy output in the released progress format.
+          emit released gha_emit_summary "$SANDBOX/released.txt"
+          for channel in "$STEP_FILE" "$COMMENT_FILE"; do
+            assert_missing "$channel" 'UPLOAD - ⠋ Running...' 'a transient repaint must not reach either summary'
+            assert_missing "$channel" 'RENDER - ⠙ Running...' 'every repaint is dropped, whatever the spinner frame'
+            assert_contains "$channel" '❯ Step 1/5 - UPLOAD - ✓ Completed (1s)' 'completed step lines must be kept'
+            assert_contains "$channel" '❯ Step 3/5 - COMPILE - ✓ Completed (0s)' 'every completed step line must be kept'
+            assert_contains "$channel" '  • Create temporary stage inside DCM_DEMO.PROJECTS' 'step detail lines must be kept'
+            assert_contains "$channel" '    ├── manifest.yml' 'the uploaded file tree must be kept'
+            assert_contains "$channel" 'ALTER    DATABASE    DCM_ENV_DEMO_VAR' 'the changeset must be kept'
+            assert_contains "$channel" '└─ changed COMMENT: Running... nightly → Running... hourly' 'the pattern is anchored, so object text mentioning Running... is kept'
+            assert_contains "$channel" 'Deployed 2 entities (0 created, 2 altered, 0 dropped).' 'the totals line must be kept'
+            assert_contains "$channel" 'Artifacts saved to: /home/runner/work/x/out' 'trailing output must be kept'
+          done
+          echo 'PASS: repaints are dropped from both summaries, completed steps kept'
+
+          # Plan output in the redesigned progress format, which the emoji coding also touches.
+          emit redesigned dcm_emit_plan_summary "$SANDBOX/redesigned.txt"
+          for channel in "$STEP_FILE" "$COMMENT_FILE"; do
+            assert_missing "$channel" 'PLAN       ⠋' 'a spinner-only row is transient and must be dropped'
+            assert_contains "$channel" 'UPLOAD     ✓  (1.3s)' 'completed rows of the newer layout must be kept'
+            assert_contains "$channel" 'PLAN       ✓  (2.0s)' 'the completed row replacing a spinner row must be kept'
+            assert_contains "$channel" '  Creating temporary stage inside DCM_DEMO.PROJECTS.' 'detail lines of the newer layout must be kept'
+            assert_contains "$channel" '🟩 CREATE   TABLE       MYDB.MYSCHEMA.T1' 'CREATE rows keep their marker'
+            assert_contains "$channel" '🟥 DROP     VIEW        MYDB.MYSCHEMA.V1' 'DROP rows keep their marker'
+            assert_contains "$channel" 'Planned 2 entities' 'the plan summary line must be kept'
+          done
+          echo 'PASS: the newer progress layout is filtered the same way'
+
+          # A failed step must survive: it is the only diagnostic in the summary.
+          emit failed dcm_emit_plan_summary "$SANDBOX/failed.txt"
+          for channel in "$STEP_FILE" "$COMMENT_FILE"; do
+            assert_missing "$channel" 'RENDER - ⠋ Running...' 'the repaint is still dropped on failure'
+            assert_contains "$channel" '❯ Step 2/5 - RENDER - ✗ Failed (1s)' 'the failed step line must be kept'
+            assert_contains "$channel" 'Error: could not render sources/definitions/a.sql' 'the error must be kept'
+          done
+          echo 'PASS: a failed step and its error are kept'
+
+          # The generic library filters nothing unless a caller sets a pattern.
+          STEP_FILE="$SANDBOX/generic.step.md"
+          COMMENT_FILE="$SANDBOX/generic.comment.md"
+          : > "$STEP_FILE"
+          : > "$COMMENT_FILE"
+          (
+            export GITHUB_STEP_SUMMARY="$STEP_FILE"
+            export GHA_SUMMARY_FILE="$COMMENT_FILE"
+            unset GHA_OUTPUT_DROP_REGEX
+            # shellcheck source=/dev/null
+            . "$WORKSPACE/scripts/gh-actions-lib.sh"
+            gha_emit_summary success "Generic command" "$SANDBOX/released.txt"
+          )
+          assert_contains "$COMMENT_FILE" 'UPLOAD - ⠋ Running...' 'gh-actions-lib alone must not filter anything'
+          echo 'PASS: filtering is opt-in through GHA_OUTPUT_DROP_REGEX'
+
+          # Both channels receive the same output.
+          for name in released redesigned failed; do
+            if ! diff -q "$SANDBOX/$name.step.md" "$SANDBOX/$name.comment.md" > /dev/null; then
+              echo "FAIL: the two summary channels diverge for $name"
+              diff "$SANDBOX/$name.step.md" "$SANDBOX/$name.comment.md" || true
+              exit 1
+            fi
+          done
+          echo 'PASS: the job summary and the PR-comment copy start from identical output'
+          SH
+          bash "$HARNESS"
+
   unit-test-pr-comment:
     name: Unit test pr-comment.js
     runs-on: ubuntu-latest
@@ -40,6 +198,9 @@ jobs:
 
           const { postSummaryComment } = require(`${process.env.GITHUB_WORKSPACE}/scripts/pr-comment.js`);
 
+          // The summary file is written by the shell libraries, which already leave the
+          // CLI's transient progress repaints out; see the summary-filter test job.
+
           const LIMIT = 65536;
           const FENCE = '```';
           const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prcomment-'));
@@ -49,7 +210,6 @@ jobs:
           function planSummary(rowCount, { steps = true, totals = true } = {}) {
             const lines = ['### ✅ DCM Plan to PREPROD successful', FENCE];
             if (steps) {
-              lines.push('❯ Step 1/4 - UPLOAD - ⠋ Running...');
               lines.push('  • Create temporary stage inside DCM_DEMO.PROJECTS');
               lines.push('❯ Step 1/4 - UPLOAD - ✓ Completed (1s)');
               lines.push('❯ Step 4/4 - PLAN - ✓ Completed (2s)');
@@ -76,13 +236,11 @@ jobs:
           // The DCM actions set these on the comment step; unset means no restructuring.
           function withFoldConfig(enabled) {
             if (!enabled) {
-              delete process.env.COMMENT_DROP_REGEX;
               delete process.env.COMMENT_FOLD_START_REGEX;
               delete process.env.COMMENT_FOLD_END_REGEX;
               delete process.env.COMMENT_FOLD_LABEL;
               return;
             }
-            process.env.COMMENT_DROP_REGEX = '(Running\\.\\.\\.|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\\s*$';
             process.env.COMMENT_FOLD_START_REGEX = '^(?:[🟩🟨🟥] )?(?:CREATE|ALTER|DROP)\\s';
             process.env.COMMENT_FOLD_END_REGEX = '^(?:Planned|Deployed|Purged|No changes detected)';
             process.env.COMMENT_FOLD_LABEL = 'Changeset';
@@ -119,6 +277,7 @@ jobs:
           const prContext = { eventName: 'pull_request', issue: { number: 7 }, repo: { owner: 'o', repo: 'r' }, runId: 42 };
           const only = (github) => [...github.store.values()][0];
           const bodies = (github) => [...github.store.values()].map(c => c.body);
+          const inFoldOf = (body) => body.slice(body.indexOf('<details>'), body.indexOf('</details>'));
 
           async function main() {
             // The changeset is folded away while steps and totals stay visible.
@@ -147,17 +306,6 @@ jobs:
               console.log('PASS: the changeset is collapsed, steps and totals stay visible');
             }
 
-            // Transient repaint lines never reach the comment.
-            {
-              withFoldConfig(true);
-              const github = stubGithub();
-              await postSummaryComment(github, prContext, summaryFile('drop.md', planSummary(2)), 'fallback', 'dcm-plan:PREPROD:proj');
-              const body = only(github).body;
-              assert.ok(!body.includes('UPLOAD - ⠋ Running...'), 'a transient repaint is dropped');
-              assert.ok(body.includes('UPLOAD - ✓ Completed (1s)'), 'the completed line for the same step is kept');
-              console.log('PASS: transient repaints are dropped, completed steps kept');
-            }
-
             // An empty changeset has no rows to fold, so nothing is folded.
             {
               withFoldConfig(true);
@@ -174,7 +322,7 @@ jobs:
             {
               withFoldConfig(true);
               const github = stubGithub();
-              const failed = `### ❌ DCM Plan to PREPROD failed\n${FENCE}\n❯ Step 2/4 - RENDER - ⠋ Running...\n❯ Step 2/4 - RENDER - ✗ Failed (1s)\nError: could not render sources/definitions/a.sql\n${FENCE}\n`;
+              const failed = `### ❌ DCM Plan to PREPROD failed\n${FENCE}\n❯ Step 2/4 - RENDER - ✗ Failed (1s)\nError: could not render sources/definitions/a.sql\n${FENCE}\n`;
               await postSummaryComment(github, prContext, summaryFile('failed.md', failed), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
               assert.ok(!body.includes('<details>'), 'a failure with no changeset is not folded');
@@ -183,16 +331,16 @@ jobs:
               console.log('PASS: a failure keeps its diagnostic visible');
             }
 
-            // Object text that merely mentions Running... is not mistaken for progress.
+            // A detail line under a changeset row belongs inside the fold with it.
             {
               withFoldConfig(true);
               const github = stubGithub();
-              const withComment = `### ✅ DCM Deploy to DEV successful\n${FENCE}\n❯ Step 5/5 - DEPLOY - ✓ Completed (2s)\n🟨 ALTER TASK MYDB.PUBLIC.LOAD\n└─ changed COMMENT: Running... nightly → Running... hourly\nDeployed 1 entity (0 created, 1 altered, 0 dropped).\n${FENCE}\n`;
+              const withComment = `### ✅ DCM Deploy to DEV successful\n${FENCE}\n❯ Step 5/5 - DEPLOY - ✓ Completed (2s)\n🟨 ALTER TASK MYDB.PUBLIC.LOAD\n└─ changed COMMENT: nightly → hourly\nDeployed 1 entity (0 created, 1 altered, 0 dropped).\n${FENCE}\n`;
               await postSummaryComment(github, prContext, summaryFile('mention.md', withComment), 'fallback', 'dcm-deploy:DEV:proj');
               const body = only(github).body;
-              assert.ok(body.includes('└─ changed COMMENT: Running... nightly → Running... hourly'),
-                'the drop pattern is anchored, so object text mentioning Running... survives');
-              console.log('PASS: object text mentioning Running... is kept');
+              assert.ok(inFoldOf(body).includes('└─ changed COMMENT: nightly → hourly'),
+                'a changeset detail line is folded with the row it belongs to');
+              console.log('PASS: changeset detail lines are folded with their row');
             }
 
             // Sections outside the output block, such as the DROP guard, are untouched.
@@ -219,7 +367,7 @@ jobs:
               await postSummaryComment(github, prContext, summaryFile('raw.md', content), 'fallback', 'dcm-plan:PREPROD:proj');
               const body = only(github).body;
               assert.ok(!body.includes('<details>'), 'no restructuring without the COMMENT_* variables');
-              assert.ok(body.includes('UPLOAD - ⠋ Running...'), 'and no filtering either');
+              assert.ok(body.includes('🟩 CREATE TABLE MYDB.MYSCHEMA.SOME_TABLE_0'), 'the changeset stays inline');
               console.log('PASS: restructuring is opt-in through the COMMENT_* variables');
             }
 

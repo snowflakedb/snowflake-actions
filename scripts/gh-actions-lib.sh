@@ -19,6 +19,21 @@ gha_summary_line() {
   fi
 }
 
+# Write one line of captured command output, unless GHA_OUTPUT_DROP_REGEX is set
+# and the line matches it. It is meant for transient lines that a live progress
+# renderer repaints, which carry no information once the run has finished. The raw
+# Actions log still holds them.
+#
+# Usage: gha_summary_output_line <text> [raw-line-for-matching]
+# Pass the raw line when <text> carries a prefix (e.g. a status emoji) that would
+# otherwise change how the pattern matches.
+gha_summary_output_line() {
+  if [ -n "${GHA_OUTPUT_DROP_REGEX:-}" ] && [[ ${2-$1} =~ $GHA_OUTPUT_DROP_REGEX ]]; then
+    return
+  fi
+  gha_summary_line "$1"
+}
+
 # Render a command-output summary block (status icon + header + fenced output)
 # to the step summary and, when set, the PR-comment file.
 #
@@ -37,7 +52,7 @@ gha_emit_summary() {
   gha_summary_line '```'
   if [ -s "$output_file" ]; then
     while IFS= read -r line; do
-      gha_summary_line "$line"
+      gha_summary_output_line "$line"
     done < "$output_file"
   else
     gha_summary_line "No output captured. Check the Actions log for details."

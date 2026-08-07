@@ -12,6 +12,16 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/gh-actions-lib.sh"
 
+# Lines left out of the plan/deploy summaries. The CLI's live progress renderer
+# repaints a step while it runs, so in a non-interactive log each step appears
+# twice: once as "Running..." and again as the completed or failed line. Only the
+# transient repaint is dropped; completed and failed step lines and their detail
+# lines are kept. The second alternation covers the spinner-only rows the newer
+# progress layout prints for a running step. Anchoring on the end of the line keeps
+# object text that mentions "Running..." intact. The raw Actions log is untouched.
+: "${GHA_OUTPUT_DROP_REGEX:=(Running\.\.\.|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)[[:space:]]*$}"
+export GHA_OUTPUT_DROP_REGEX
+
 # Read a scalar value from manifest.yml.
 # Usage: dcm_manifest_value <yq-path> [manifest-path]
 dcm_manifest_value() {
@@ -78,10 +88,10 @@ dcm_emit_plan_summary() {
   if [ -s "$output_file" ]; then
     while IFS= read -r line; do
       case "$line" in
-        CREATE\ *) gha_summary_line "🟩 $line" ;;
-        ALTER\ *)  gha_summary_line "🟨 $line" ;;
-        DROP\ *)   gha_summary_line "🟥 $line" ;;
-        *)         gha_summary_line "$line" ;;
+        CREATE\ *) gha_summary_output_line "🟩 $line" "$line" ;;
+        ALTER\ *)  gha_summary_output_line "🟨 $line" "$line" ;;
+        DROP\ *)   gha_summary_output_line "🟥 $line" "$line" ;;
+        *)         gha_summary_output_line "$line" ;;
       esac
     done < "$output_file"
   else
