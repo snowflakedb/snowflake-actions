@@ -170,6 +170,29 @@ dcm_emit_changeset_summary() {
   fi
 }
 
+# Name a deployment after where it came from and which run produced it:
+# <branch>-<run id>.<run attempt>, e.g. feature_my_change-31184885387.1
+#
+# The alias has to be unique within the project, and the run id with the attempt is
+# the only token GitHub guarantees unique per run, so re-running a workflow no longer
+# collides with its earlier attempt. No commit SHA is included: GITHUB_SHA means
+# something different on every trigger (the merge commit on pull_request, the default
+# branch tip on pull_request_target, the pushed commit on push), and the run it points
+# to already names the commit.
+#
+# Falls back to the ref when no pull request is associated, so a deployment triggered
+# by a push is labelled too.
+#
+# Usage: dcm_deployment_alias [pr-branch]
+dcm_deployment_alias() {
+  local source="${1:-$GITHUB_REF_NAME}"
+  # Replace path separators and punctuation so the alias reads as one token, and
+  # truncate so a long branch name cannot dominate it. The CLI quotes the alias, so
+  # this is about legibility rather than identifier rules.
+  local safe="${source//[^a-zA-Z0-9]/_}"
+  printf '%s-%s.%s\n' "${safe:0:40}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+}
+
 # Persist a DCM step result to the shared results directory for later aggregation.
 # Usage: dcm_write_result <kind> <target> <result>
 dcm_write_result() {

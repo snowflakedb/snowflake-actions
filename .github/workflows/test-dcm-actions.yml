@@ -18,14 +18,14 @@ permissions:
 
 jobs:
   unit-test-summary-structure:
-    name: Unit test summary structure
+    name: Unit test summary structure and alias
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: "Test: the changeset section, colour coding and dropped repaints"
+      - name: "Test: changeset section, colour coding, repaints and deployment alias"
         shell: bash
         run: |
           set -e
@@ -201,6 +201,42 @@ jobs:
           assert_contains "$COMMENT_FILE" 'No output captured. Check the Actions log for details.' 'empty output keeps its placeholder'
           assert_balanced "$COMMENT_FILE" 'nothing'
           echo 'PASS: empty output keeps its placeholder'
+
+          # The deployment alias must be unique per run, so a re-run does not collide with its
+          # earlier attempt, and must still name where the change came from.
+          alias_of() {
+            (
+              export GITHUB_RUN_ID="${2:-31184885387}"
+              export GITHUB_RUN_ATTEMPT="${3:-1}"
+              export GITHUB_REF_NAME="${4:-main}"
+              # shellcheck source=/dev/null
+              . "$WORKSPACE/scripts/dcm-lib.sh"
+              dcm_deployment_alias "$1"
+            )
+          }
+
+          assert_alias() {
+            local got="$1" want="$2" why="$3"
+            [ "$got" = "$want" ] || { echo "FAIL: $why"; echo "  want: $want"; echo "  got:  $got"; exit 1; }
+          }
+
+          assert_alias "$(alias_of 'feature/my-change')" 'feature_my_change-31184885387.1' \
+            'the PR branch is sanitised and carries the run id and attempt'
+          assert_alias "$(alias_of 'feature/my-change' 31184885387 2)" 'feature_my_change-31184885387.2' \
+            'a re-run of the same commit gets a different alias'
+          assert_alias "$(alias_of '' 31184885387 1 'main')" 'main-31184885387.1' \
+            'with no PR branch the ref name is used, so a push deploy is still labelled'
+          assert_alias "$(alias_of '' 31184885387 1 'release/3.4')" 'release_3_4-31184885387.1' \
+            'a slashed ref name is sanitised too'
+          assert_alias "$(alias_of 'dependabot/github_actions/actions/checkout-7.0.1')" \
+            'dependabot_github_actions_actions_checko-31184885387.1' \
+            'a long branch is truncated so it cannot dominate the alias'
+
+          # Two runs of the same commit must never produce the same alias.
+          first="$(alias_of 'feature/x' 100 1)"
+          second="$(alias_of 'feature/x' 200 1)"
+          [ "$first" != "$second" ] || { echo "FAIL: two runs produced the same alias"; exit 1; }
+          echo 'PASS: the deployment alias is unique per run and names its source'
           SH
           bash "$HARNESS"
 

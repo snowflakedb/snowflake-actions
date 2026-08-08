@@ -42,10 +42,9 @@
 #       allow-drops: "false"
 #       comment-on-pr: "true"
 #
-#   The deployment alias is set automatically to the source branch of the
-#   associated pull request combined with the short commit SHA (e.g.
-#   my-branch-a1b2c3d) so it stays unique per commit. If no PR branch can
-#   be found, no alias is passed.
+#   The deployment alias is set automatically to the pull request's head branch,
+#   or the ref name when no pull request is associated, combined with the run id
+#   and attempt (e.g. my_branch-31184885387.1) so it stays unique per run.
 #
 #   When comment-on-pr is enabled, the calling job also needs:
 #
@@ -160,14 +159,7 @@ runs:
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
 
-        ALIAS_ARG=()
-        if [ -n "$PR_BRANCH" ]; then
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          # Snowflake identifiers only allow alphanumerics and underscores;
-          # replace every other character so e.g. feature/foo becomes feature_foo.
-          SAFE_BRANCH="${PR_BRANCH//[^a-zA-Z0-9]/_}"
-          ALIAS_ARG=(--alias "${SAFE_BRANCH}-${SHORT_SHA}")
-        fi
+        ALIAS_ARG=(--alias "$(dcm_deployment_alias "$PR_BRANCH")")
 
         DEPLOY_OUTPUT_FILE="/tmp/dcm-deploy-cli-output.txt"
 

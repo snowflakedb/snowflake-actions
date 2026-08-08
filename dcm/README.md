@@ -274,7 +274,7 @@ The `dcm-plan` action **must** run before this action in the same job -- it prod
 
 ⚠️ If the preceding `dcm-plan` step ran with `plan-delta: "true"`, the changeset in `plan_result.json` is partial and drop detection only covers the changed definitions and their dependents. Use a full plan when drop detection needs to be complete.
 
-The deployment alias passed to `snow dcm deploy --alias` is set automatically to the source branch of the associated pull request (resolved from `pull_request` events directly, or via the merge commit on `push` events). When no PR branch can be found, no alias is passed.
+The deployment alias passed to `snow dcm deploy --alias` is built automatically as `<source>-<run id>.<run attempt>`, for example `feature_my_change-31184885387.1`. `<source>` is the head branch of the associated pull request, or the ref name when no pull request is associated, sanitised to alphanumerics and underscores and truncated to 40 characters. The run id and attempt keep the alias unique, which the project requires, so re-running a workflow does not collide with its earlier attempt. No commit SHA is included, because the run the alias names already identifies the commit.
 
 The deploy output is written to the GitHub Step Summary and, when enabled, posted as a PR comment. See [Step summaries and PR comments](#step-summaries-and-pr-comments).
 
