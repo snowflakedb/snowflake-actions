@@ -171,7 +171,7 @@ runs:
 
     - name: Upload plan artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: dcm-plan-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: |
@@ -180,7 +180,7 @@ runs:
 
     - name: Comment on PR
       if: always() && inputs.comment-on-pr == 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);

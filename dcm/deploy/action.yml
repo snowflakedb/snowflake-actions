@@ -137,7 +137,7 @@ runs:
 
     - name: Detect PR source branch
       id: pr_branch
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const { resolvePrBranch } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
@@ -257,14 +257,14 @@ runs:
 
     - name: Upload deploy result artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: dcm-deploy-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: /tmp/dcm-results/dcm-deploy-${{ inputs.target }}.txt
 
     - name: Comment on PR
       if: always() && inputs.comment-on-pr == 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);

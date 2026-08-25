@@ -4,7 +4,18 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # The github-actions ecosystem with directory "/" only covers .github/workflows/
+  # and the root action.yml. The nested composite actions each need their own
+  # directory entry, or their `uses:` pins never get update PRs — which is how the
+  # dcm/* actions were left on Node 20 runtimes.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/cortex-code"
+      - "/dcm/connection-test"
+      - "/dcm/deploy"
+      - "/dcm/parse-manifest"
+      - "/dcm/plan"
+      - "/snowflake-cli"
     schedule:
       interval: "weekly"
