@@ -1,0 +1,17 @@
+name: "test-03 custom-github-ref"
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          custom-github-ref: "main"
+      - run: snow --version
