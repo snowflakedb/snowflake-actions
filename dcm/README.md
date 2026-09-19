@@ -14,10 +14,10 @@ To use an action in your workflow, reference it with:
 
 | Action | Description |
 |--------|-------------|
-| [`dcm-parse-manifest`](#dcm-parse-manifest) | Parse `manifest.yml` and output target names as a JSON array for matrix strategies |
-| [`dcm-connection-test`](#dcm-connection-test) | Test Snowflake connectivity, validate role match, check project status |
-| [`dcm-plan`](#dcm-plan) | Run `snow dcm plan`, summarize the changeset, upload artifacts |
-| [`dcm-deploy`](#dcm-deploy) | Deploy with optional drop detection |
+| [`dcm/parse-manifest@v3`](#dcmparse-manifestv3) | Parse `manifest.yml` and output target names as a JSON array for matrix strategies |
+| [`dcm/connection-test@v3`](#dcmconnection-testv3) | Test Snowflake connectivity, validate role match, check project status |
+| [`dcm/plan@v3`](#dcmplanv3) | Run `snow dcm plan`, summarize the changeset, upload artifacts |
+| [`dcm/deploy@v3`](#dcmdeployv3) | Deploy with optional drop detection |
 
 ## Authentication
 
@@ -64,7 +64,7 @@ permissions:
   contents: read
 ```
 
-When using `comment-on-pr: "true"` on `dcm-plan` or `dcm-deploy`, also add:
+When using `comment-on-pr: "true"` on `dcm/plan@v3` or `dcm/deploy@v3`, also add:
 
 ```yaml
 permissions:
@@ -77,7 +77,7 @@ permissions:
 
 ## Step summaries and PR comments
 
-`dcm-plan` and `dcm-deploy` both write the captured CLI output to the GitHub Step
+`dcm/plan@v3` and `dcm/deploy@v3` both write the captured CLI output to the GitHub Step
 Summary, and post the same content as a pull request comment when
 `comment-on-pr: "true"`. The two views are byte-identical; only the size limit
 described below applies to the comment alone.
@@ -137,7 +137,7 @@ targets or projects in the same pull request, keep separate comments.
 trigger, `push` included, it is looked up from the commit that started the run, and
 when no pull request is associated the comment is skipped and the step logs
 `No PR found for this commit`. The same resolution decides the deployment alias
-`dcm-deploy` passes to `snow dcm deploy --alias`.
+`dcm/deploy@v3` passes to `snow dcm deploy --alias`.
 
 **Size limit.** GitHub rejects comment bodies longer than 65536 characters, which a
 plan of a few hundred entities can exceed. A body over the limit is truncated at a
@@ -148,7 +148,7 @@ full output.
 
 ---
 
-## dcm-parse-manifest
+## dcm/parse-manifest@v3
 
 Reads a DCM `manifest.yml` and outputs the list of target names as a JSON array, ready to feed into a GitHub Actions matrix strategy. This is useful for dynamically running jobs across all targets without hardcoding them.
 
@@ -200,7 +200,7 @@ jobs:
 
 ---
 
-## dcm-connection-test
+## dcm/connection-test@v3
 
 Tests the Snowflake connection for a target, validates that the connection role matches the manifest `project_owner`, and checks whether the DCM project already exists.
 
@@ -231,7 +231,7 @@ Tests the Snowflake connection for a target, validates that the connection role 
 
 ---
 
-## dcm-plan
+## dcm/plan@v3
 
 Runs `snow dcm plan` against a target, writes the plan output to the GitHub Step Summary, and uploads the plan result as an artifact. See [Step summaries and PR comments](#step-summaries-and-pr-comments) for what the summary and the comment contain.
 
@@ -266,13 +266,13 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 
 ---
 
-## dcm-deploy
+## dcm/deploy@v3
 
 Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying.
 
-The `dcm-plan` action **must** run before this action in the same job -- it produces the `out/plan_result.json` file used for drop detection.
+The `dcm/plan@v3` action **must** run before this action in the same job -- it produces the `out/plan_result.json` file used for drop detection.
 
-⚠️ If the preceding `dcm-plan` step ran with `plan-delta: "true"`, the changeset in `plan_result.json` is partial and drop detection only covers the changed definitions and their dependents. Use a full plan when drop detection needs to be complete.
+⚠️ If the preceding `dcm/plan@v3` step ran with `plan-delta: "true"`, the changeset in `plan_result.json` is partial and drop detection only covers the changed definitions and their dependents. Use a full plan when drop detection needs to be complete.
 
 The deployment alias passed to `snow dcm deploy --alias` is built automatically as `<source>-<run id>.<run attempt>`, for example `feature_my_change-31184885387.1`. `<source>` is the head branch of the associated pull request, or the ref name when no pull request is associated, sanitised to alphanumerics and underscores and truncated to 40 characters. The run id and attempt keep the alias unique, which the project requires, so re-running a workflow does not collide with its earlier attempt. No commit SHA is included, because the run the alias names already identifies the commit.
 
@@ -381,4 +381,3 @@ jobs:
           snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 ```
-
