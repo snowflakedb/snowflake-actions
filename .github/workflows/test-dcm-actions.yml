@@ -17,6 +17,108 @@ permissions:
   contents: read
 
 jobs:
+  unit-test-connection-summary:
+    name: Unit test connection summary validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install YAML parser
+        run: python3 -m pip install PyYAML==6.0.3
+
+      - name: "Test: account identifiers and connection validation failures"
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import unittest
+
+          import yaml
+
+          action = yaml.safe_load(Path("dcm/connection-test/action.yml").read_text())
+          summary_script = next(
+              step["run"] for step in action["runs"]["steps"]
+              if step.get("id") == "validate_role"
+          )
+
+          class ConnectionSummaryTest(unittest.TestCase):
+              def run_summary(self, manifest_account, connection_account, **overrides):
+                  with tempfile.TemporaryDirectory() as temporary_directory:
+                      summary_file = Path(temporary_directory) / "summary.md"
+                      environment = {
+                          **os.environ,
+                          "GITHUB_STEP_SUMMARY": str(summary_file),
+                          "TARGET": "TEST",
+                          "MANIFEST_ACCOUNT": manifest_account,
+                          "CONN_ACCOUNT": connection_account,
+                          "MANIFEST_ROLE": "PROJECT_OWNER",
+                          "CONN_ROLE": "PROJECT_OWNER",
+                          "CONN_USER": "TEST_USER",
+                          "PROJECT_NAME": "TEST_DB.TEST_SCHEMA.TEST_PROJECT",
+                          "CONN_ERROR": "",
+                          "CONN_OUTCOME": "success",
+                          "USER_HAS_ROLE": "true",
+                          "ROLE_IS_DEFAULT": "true",
+                          "PROJECT_EXISTS": "true",
+                          "PROJECT_OWNER": "PROJECT_OWNER",
+                          **overrides,
+                      }
+                      result = subprocess.run(
+                          ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", summary_script],
+                          env=environment, capture_output=True, text=True,
+                      )
+                      return result.returncode, summary_file.read_text(), result.stderr
+
+              def test_matching_accounts(self):
+                  for manifest_account, connection_account in [
+                      ("myaccount", "myaccount"),
+                      ("MyAccount", "MYACCOUNT"),
+                      ("myaccount.ap-southeast-2", "MYACCOUNT"),
+                      ("MyAccount.eu-central-1", "myaccount"),
+                      ("myaccount.east-us-2.azure", "myaccount"),
+                      ("myaccount.us-central1.gcp", "myaccount"),
+                      ("myaccount.ap-southeast-2.privatelink", "myaccount"),
+                      ("myorg-myaccount", "MYORG-MYACCOUNT"),
+                      ("myaccount.ap-southeast-2", "MYACCOUNT.ap-southeast-2"),
+                  ]:
+                      with self.subTest(manifest=manifest_account):
+                          returncode, summary, stderr = self.run_summary(manifest_account, connection_account)
+                          self.assertEqual(returncode, 0, stderr or summary)
+                          self.assertIn(f"| Account | `{manifest_account}` | `{connection_account}` | ✅ |", summary)
+
+              def test_different_accounts(self):
+                  for manifest_account in ["otheraccount", "otheraccount.ap-southeast-2", "myaccount2.ap-southeast-2", "otherorg-myaccount"]:
+                      with self.subTest(manifest=manifest_account):
+                          returncode, summary, _ = self.run_summary(manifest_account, "myaccount")
+                          self.assertEqual(returncode, 1, summary)
+                          self.assertIn("| ❌ |", summary)
+
+              def test_other_validation_failures(self):
+                  for overrides in [
+                      {"CONN_OUTCOME": "failure", "CONN_ERROR": "Authentication failed"},
+                      {"CONN_ROLE": "OTHER_ROLE"},
+                      {"ROLE_IS_DEFAULT": "false", "USER_HAS_ROLE": "false"},
+                      {"PROJECT_OWNER": "OTHER_OWNER"},
+                  ]:
+                      with self.subTest(overrides=overrides):
+                          returncode, summary, _ = self.run_summary("myaccount.ap-southeast-2", "myaccount", **overrides)
+                          self.assertEqual(returncode, 1, summary)
+
+              def test_missing_project_is_nonfatal(self):
+                  returncode, summary, stderr = self.run_summary(
+                      "myaccount.ap-southeast-2", "myaccount", PROJECT_EXISTS="false", PROJECT_OWNER="",
+                  )
+                  self.assertEqual(returncode, 0, stderr or summary)
+                  self.assertIn("Project does not yet exist", summary)
+
+          unittest.main()
+          PY
+
   unit-test-summary-structure:
     name: Unit test summary structure and alias
     runs-on: ubuntu-latest
