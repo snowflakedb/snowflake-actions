@@ -204,6 +204,8 @@ jobs:
 
 Tests the Snowflake connection for a target, validates that the connection role matches the manifest `project_owner`, and checks whether the DCM project already exists.
 
+Account validation is case-insensitive and compares the portion before the first dot, so `myaccount.ap-southeast-2` matches the CLI's `myaccount` output. The full `account_identifier` is preserved for authentication and displayed in the summary.
+
 ```yaml
 - uses: snowflakedb/snowflake-actions/dcm/connection-test@v3
   with:

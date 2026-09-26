@@ -180,9 +180,10 @@ runs:
           CONN_ROLE="❌ failed"
           FAILED=true
         else
-          # Account validation
-          CONN_ACCT_UPPER=$(echo "$CONN_ACCOUNT" | tr '[:lower:]' '[:upper:]')
-          MANIFEST_ACCT_UPPER=$(echo "$MANIFEST_ACCOUNT" | tr '[:lower:]' '[:upper:]')
+          # The connector removes region/cloud suffixes from the account value.
+          # Normalize only for comparison; keep the full identifier for connecting.
+          CONN_ACCT_UPPER=$(printf '%s' "${CONN_ACCOUNT%%.*}" | tr '[:lower:]' '[:upper:]')
+          MANIFEST_ACCT_UPPER=$(printf '%s' "${MANIFEST_ACCOUNT%%.*}" | tr '[:lower:]' '[:upper:]')
           if [ "$CONN_ACCT_UPPER" = "$MANIFEST_ACCT_UPPER" ]; then
             ACCT_STATUS="✅"
           else
