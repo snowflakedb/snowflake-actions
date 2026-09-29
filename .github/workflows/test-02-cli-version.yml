@@ -1,0 +1,21 @@
+name: "test-02 cli-version input"
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: latest
+        run: |
+          VERSION=$(curl -s https://pypi.org/pypi/snowflake-cli/json | jq -r '.info.version')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      - uses: ./
+        with:
+          cli-version: ${{ steps.latest.outputs.version }}
+      - run: snow --version | grep "${{ steps.latest.outputs.version }}"
