@@ -26,4 +26,8 @@ VERSION="$(cat "${SCRIPT_DIR}/../VERSION")"
     if [ -n "${1:-}" ]; then
         echo "$1=true"
     fi
+    # Attribute later CoCo steps too, but keep caller-provided entrypoints.
+    if [ "${1:-}" = "SF_CORTEX_CODE_GITHUB_ACTION" ] && [ -z "${CORTEX_CODE_ENTRYPOINT:-}" ]; then
+        echo "CORTEX_CODE_ENTRYPOINT=snowflake-github-action"
+    fi
 } >> "$GITHUB_ENV"

@@ -31,6 +31,10 @@ jobs:
       - name: Install Snowflake CLI
         uses: ./
 
+      - name: Verify Snowflake CLI setup did not set a CoCo entrypoint
+        shell: bash
+        run: test -z "${CORTEX_CODE_ENTRYPOINT:-}"
+
       - name: Install Cortex Code CLI (stable, latest)
         uses: ./cortex-code
 
@@ -40,6 +44,10 @@ jobs:
           set -e
           which cortex
           cortex --version
+
+      - name: Verify standalone CoCo usage attribution
+        shell: bash
+        run: test "${CORTEX_CODE_ENTRYPOINT:-}" = snowflake-github-action
 
       - name: Verify install location
         shell: bash
@@ -106,6 +114,10 @@ jobs:
         with:
           cortex-code: true
 
+      - name: Verify root CoCo usage attribution
+        shell: bash
+        run: test "${CORTEX_CODE_ENTRYPOINT:-}" = snowflake-github-action
+
       - name: Verify both snow and cortex are on PATH
         shell: bash
         run: |
@@ -141,6 +153,63 @@ jobs:
             exit 1
           fi
           echo "PASS: only cortex installed from root"
+
+  unit-test-setup-environment:
+    name: Unit test setup-environment.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: default entrypoint for unset and empty values"
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset CORTEX_CODE_ENTRYPOINT
+          for state in unset empty; do
+            if [ "$state" = empty ]; then
+              export CORTEX_CODE_ENTRYPOINT=""
+            fi
+            GITHUB_ENV=$(mktemp)
+            export GITHUB_ENV
+            bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+            diff <(printf '%s\n' \
+              'SF_GITHUB_ACTION=true' \
+              "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)" \
+              'SF_CORTEX_CODE_GITHUB_ACTION=true' \
+              'CORTEX_CODE_ENTRYPOINT=snowflake-github-action') "$GITHUB_ENV"
+          done
+
+      - name: "Test: preserve an explicit entrypoint without rewriting it"
+        shell: bash
+        env:
+          CORTEX_CODE_ENTRYPOINT: sdk-python
+        run: |
+          set -euo pipefail
+          GITHUB_ENV=$(mktemp)
+          export GITHUB_ENV
+          bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+          test "$CORTEX_CODE_ENTRYPOINT" = sdk-python
+          diff <(printf '%s\n' \
+            'SF_GITHUB_ACTION=true' \
+            "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)" \
+            'SF_CORTEX_CODE_GITHUB_ACTION=true') "$GITHUB_ENV"
+
+      - name: "Test: other components do not set a CoCo entrypoint"
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset CORTEX_CODE_ENTRYPOINT
+          for component in '' SF_DCM_GITHUB_ACTION; do
+            GITHUB_ENV=$(mktemp)
+            export GITHUB_ENV
+            bash scripts/setup-environment.sh "$component"
+            diff <(printf '%s\n' \
+              'SF_GITHUB_ACTION=true' \
+              "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)"; \
+              if [ -n "$component" ]; then printf '%s=true\n' "$component"; fi) "$GITHUB_ENV"
+          done
 
   unit-test-setup-connection:
     name: Unit test setup-connection.py
@@ -376,6 +445,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up CoCo usage attribution for later prompt steps
+        shell: bash
+        run: |
+          unset CORTEX_CODE_ENTRYPOINT
+          bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+
       - name: Put a fake cortex on PATH
         shell: bash
         run: |
@@ -385,8 +460,11 @@ jobs:
           # run-prompt.sh builds without needing Snowflake or the real CLI.
           FAKE_BIN="${RUNNER_TEMP}/fakebin"
           mkdir -p "$FAKE_BIN"
+          # Expand these variables when the stub runs, not when it is written.
+          # shellcheck disable=SC2016
           printf '%s\n' \
             '#!/usr/bin/env bash' \
+            'test "${CORTEX_CODE_ENTRYPOINT:-}" = snowflake-github-action || exit 99' \
             'printf "%s\n" "$@" > "${CORTEX_ARGS_FILE:?}"' \
             'exit "${FAKE_CORTEX_EXIT:-0}"' > "$FAKE_BIN/cortex"
           chmod +x "$FAKE_BIN/cortex"
