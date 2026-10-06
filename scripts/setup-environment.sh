@@ -10,9 +10,8 @@
 # directory depth — calls this the same way; the script self-locates VERSION.
 #
 # Usage:
-#   bash <path>/scripts/setup-environment.sh [--cortex-code | COMPONENT_MARKER]
+#   bash <path>/scripts/setup-environment.sh [COMPONENT_MARKER]
 #
-# --cortex-code: default the CoCo entrypoint without exporting a component marker.
 # COMPONENT_MARKER (optional): name of an extra env var to set to "true"
 #   (e.g. SF_DCM_GITHUB_ACTION).
 
@@ -24,12 +23,7 @@ VERSION="$(cat "${SCRIPT_DIR}/../VERSION")"
 {
     echo "SF_GITHUB_ACTION=true"
     echo "SF_CICD_INTEGRATION_VERSION=${VERSION}"
-    if [ "${1:-}" = "--cortex-code" ]; then
-        # Attribute later CoCo steps too, but keep caller-provided entrypoints.
-        if [ -z "${CORTEX_CODE_ENTRYPOINT:-}" ]; then
-            echo "CORTEX_CODE_ENTRYPOINT=snowflake-github-action"
-        fi
-    elif [ -n "${1:-}" ]; then
+    if [ -n "${1:-}" ]; then
         echo "$1=true"
     fi
 } >> "$GITHUB_ENV"

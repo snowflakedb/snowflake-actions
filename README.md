@@ -217,18 +217,6 @@ jobs:
       - run: cortex exec --file .cortex/prompts/scan.md -c default --bypass --no-history
 ```
 
-### Usage attribution
-
-The `cortex-code` action and the root action with `cortex-code: true` set
-`CORTEX_CODE_ENTRYPOINT=snowflake-github-action` for subsequent steps in the job,
-including the action's optional prompt step. CoCo versions that support this
-variable send it as `CodingAgent.Entrypoint` in request telemetry.
-
-An existing nonempty `CORTEX_CODE_ENTRYPOINT` is preserved. You can override it
-on a later step; SDKs can also supply their own entrypoint. Snowflake-CLI-only
-setup does not set it. This label identifies CoCo use after setup by this action,
-not all GitHub Actions usage or only prompts executed directly by the action.
-
 ### Platform support
 
 Runs on Linux (ubuntu) GitHub-hosted runners. Requires Python 3.11+ on PATH (satisfied by all GitHub-hosted runners).

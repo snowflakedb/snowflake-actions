@@ -141,7 +141,10 @@ runs:
     - name: Set up Cortex Code action environment
       if: ${{ inputs.cortex-code == 'true' }}
       shell: bash
-      run: bash $GITHUB_ACTION_PATH/scripts/setup-environment.sh --cortex-code
+      run: |
+        if [ -z "${CORTEX_CODE_ENTRYPOINT:-}" ]; then
+          echo "CORTEX_CODE_ENTRYPOINT=snowflake-github-action" >> "$GITHUB_ENV"
+        fi
 
     - name: Validate Cortex Code inputs
       if: ${{ inputs.cortex-code == 'true' }}
