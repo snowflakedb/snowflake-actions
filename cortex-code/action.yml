@@ -63,7 +63,7 @@ runs:
 
     - name: Set up action environment
       shell: bash
-      run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+      run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh --cortex-code
 
     - name: Install Cortex Code CLI
       shell: bash

@@ -173,11 +173,10 @@ jobs:
             fi
             GITHUB_ENV=$(mktemp)
             export GITHUB_ENV
-            bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+            bash scripts/setup-environment.sh --cortex-code
             diff <(printf '%s\n' \
               'SF_GITHUB_ACTION=true' \
               "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)" \
-              'SF_CORTEX_CODE_GITHUB_ACTION=true' \
               'CORTEX_CODE_ENTRYPOINT=snowflake-github-action') "$GITHUB_ENV"
           done
 
@@ -189,12 +188,11 @@ jobs:
           set -euo pipefail
           GITHUB_ENV=$(mktemp)
           export GITHUB_ENV
-          bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+          bash scripts/setup-environment.sh --cortex-code
           test "$CORTEX_CODE_ENTRYPOINT" = sdk-python
           diff <(printf '%s\n' \
             'SF_GITHUB_ACTION=true' \
-            "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)" \
-            'SF_CORTEX_CODE_GITHUB_ACTION=true') "$GITHUB_ENV"
+            "SF_CICD_INTEGRATION_VERSION=$(cat VERSION)") "$GITHUB_ENV"
 
       - name: "Test: other components do not set a CoCo entrypoint"
         shell: bash
@@ -449,7 +447,7 @@ jobs:
         shell: bash
         run: |
           unset CORTEX_CODE_ENTRYPOINT
-          bash scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+          bash scripts/setup-environment.sh --cortex-code
 
       - name: Put a fake cortex on PATH
         shell: bash

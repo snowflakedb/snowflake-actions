@@ -141,7 +141,7 @@ runs:
     - name: Set up Cortex Code action environment
       if: ${{ inputs.cortex-code == 'true' }}
       shell: bash
-      run: bash $GITHUB_ACTION_PATH/scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
+      run: bash $GITHUB_ACTION_PATH/scripts/setup-environment.sh --cortex-code
 
     - name: Validate Cortex Code inputs
       if: ${{ inputs.cortex-code == 'true' }}
