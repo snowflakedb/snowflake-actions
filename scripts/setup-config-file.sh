@@ -8,14 +8,18 @@ then
     exit 0
 fi
 
-# The command `chown $USER config.toml` doesn't work in this context, 
+# The command `chown $USER config.toml` doesn't work in this context,
 # so copying the file is a workaround to change the file ownership to the current user.
-mkdir -p ./temp/
-cp "$CONFIG_FILE_PATH" ./temp/config.toml
+# Stage the copy in a unique temporary directory, then install into ~/.snowflake.
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEMP_DIR"' EXIT
+TEMP_CONFIG="${TEMP_DIR}/config.toml"
 
-if [[ ! $RUNNER_OS = "Windows" ]]; then 
-    chmod 0600 ./temp/config.toml
+cp "$CONFIG_FILE_PATH" "$TEMP_CONFIG"
+
+if [[ ${RUNNER_OS:-} != "Windows" ]]; then
+    chmod 0600 "$TEMP_CONFIG"
 fi
 
 mkdir -p ~/.snowflake/
-mv ./temp/config.toml ~/.snowflake/
+mv -f "$TEMP_CONFIG" ~/.snowflake/config.toml
