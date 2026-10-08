@@ -8,6 +8,6 @@
 set -euo pipefail
 
 export PATH="${HOME}/.local/bin:$PATH"
-VERSION=$(snow --version 2>&1 | head -1)
+VERSION=$(SNOWFLAKE_CLI_IGNORE_NEW_VERSION_WARNING=true snow --version 2>&1 | head -1)
 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 echo "Snowflake CLI: ${VERSION}"
