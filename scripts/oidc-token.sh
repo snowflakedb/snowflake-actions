@@ -6,8 +6,8 @@
 # This is the single token-minting path for the whole repo: the Cortex Code
 # action calls it directly, and the snow-install path calls it via
 # configure-snowflake-oidc.sh. It replaces `snow auth oidc read-token
-# --type=github` — both request the GitHub-issued JWT for audience
-# "snowflakecomputing.com" from the Actions OIDC endpoint — so minting, masking,
+# --type=github` — both request the GitHub-issued JWT for SNOWFLAKE_AUDIENCE
+# (default snowflakecomputing.com) from the Actions OIDC endpoint — so minting, masking,
 # and idempotency live in exactly one place and neither path needs `snow`.
 #
 # Idempotent: if a prior step (e.g. the snow-install OIDC path) already exported
@@ -24,6 +24,12 @@ set -euo pipefail
 
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
 AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
+case "$AUDIENCE" in
+    *$'\n'*)
+        echo "::error::oidc-audience must be a single line"
+        exit 1
+        ;;
+esac
 
 # Reuse a token that's already in the env rather than minting again. This covers
 # the intended case (the snow-install and Cortex Code paths both run with
@@ -42,20 +48,24 @@ if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUES
     exit 1
 fi
 
-response=$(curl -sS --fail \
-    -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}") || {
-    echo "::error::Could not reach the GitHub OIDC endpoint to mint a token. Confirm the job has 'permissions: id-token: write' and that GitHub Actions OIDC is reachable."
-    exit 1
-}
-
-# Parse the JSON {"value": "<jwt>"} with the stdlib. Prefer python3, falling
+# Parse JSON and encode the audience with the stdlib. Prefer python3, falling
 # back to python (Windows runners expose the interpreter as `python`).
 PYTHON="$(command -v python3 || command -v python || true)"
 if [ -z "$PYTHON" ]; then
     echo "::error::No python interpreter (python3 or python) found to parse the OIDC token."
     exit 1
 fi
+# GitHub takes the audience as a query parameter. Encode it so an in-zone
+# value that contains reserved characters cannot break the request URL.
+encoded_audience="$("$PYTHON" -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$AUDIENCE")"
+
+response=$(curl -sS --fail \
+    -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}") || {
+    echo "::error::Could not reach the GitHub OIDC endpoint to mint a token. Confirm the job has 'permissions: id-token: write' and that GitHub Actions OIDC is reachable."
+    exit 1
+}
+
 token=$(printf '%s' "$response" | "$PYTHON" -c 'import sys, json; print(json.load(sys.stdin)["value"])')
 
 if [ -z "$token" ]; then
@@ -69,5 +79,7 @@ echo "::add-mask::${token}"
     # Record the auth type this action configured (telemetry). Set here on the
     # shared minting path so both the snow and Cortex Code paths report it.
     echo "SF_CICD_AUTH_TYPE=oidc"
+    # Keep the connector/CLI audience env aligned with the aud we just requested.
+    echo "SNOWFLAKE_AUDIENCE=${AUDIENCE}"
 } >> "$GITHUB_ENV"
 echo "Minted GitHub OIDC token into \$${TOKEN_NAME_UPPER} (audience: ${AUDIENCE})."

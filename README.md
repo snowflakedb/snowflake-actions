@@ -6,8 +6,8 @@ GitHub Action that installs and configures the [Snowflake CLI](https://docs.snow
 
 The action installs the Snowflake CLI in your workflow and can configure authentication, so later steps can run `snow` commands against Snowflake.
 
-1. Installs `uv`.
-2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps.
+1. Installs `uv`, unless `snow` is already on `PATH` or `cli-artifact` points at a local wheel (those paths do not download `uv`).
+2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps. A preinstalled `snow` is reused when `cli-version` is left empty.
 3. Copies your `config.toml` to `~/.snowflake/` if present (skipped if the file doesn't exist).
 4. With `use-oidc: true`, reads a GitHub OIDC token and sets the workload-identity environment variables the CLI expects.
 
@@ -43,16 +43,31 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `cli-version` | latest | CLI version to install (e.g. `3.20.0`). |
+| `cli-version` | latest | CLI version to install (e.g. `3.20.0`). Empty reuses a `snow` already on `PATH`. `latest` always installs from PyPI. |
 | `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
+| `oidc-audience` | `snowflakecomputing.com` | `aud` claim for the OIDC token. AWS ISO callers must override this. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
+| `cli-artifact` | none | Local wheel, sdist, or directory of wheels. Installed offline. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. |
 
-- `cli-version` and `custom-github-ref` are mutually exclusive.
+- `cli-version`, `custom-github-ref`, and `cli-artifact` are mutually exclusive.
 - `use-oidc` needs CLI `3.11+` and `id-token: write`.
 - `custom-github-ref` installs from [`snowflake-cli`](https://github.com/snowflakedb/snowflake-cli) instead of PyPI, and requires action `v2+`.
 - `default-config-file-path` is skipped if the file is absent.
+
+## Air-gapped runners and AWS ISO
+
+GitHub-hosted runners are unchanged: the action downloads `uv` and installs the CLI from PyPI.
+
+On a runner with no route to `pypi.org`, `github.com`, or `ai.snowflake.com`:
+
+- Preinstall `snow` on `PATH` and leave `cli-version`, `custom-github-ref`, and `cli-artifact` empty. The action reuses that binary and does not download `uv`.
+- Or set `cli-artifact` to a wheel, sdist, or a directory of wheels. `uv` and `python3` must already be on the runner. The install is `uv tool install --offline` and does not contact PyPI. Put dependency wheels next to the CLI wheel (or in that directory) so `--find-links` can resolve them.
+- For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave the version at `latest`. The action does not curl `ai.snowflake.com`. Pinning a Cortex version still reaches the network.
+
+`oidc-audience` defaults to `snowflakecomputing.com`. An AWS ISO (or other in-zone) account must set it to the audience configured on its Snowflake OIDC security integration. The action requests that value as the GitHub OIDC token `aud` claim. These packages have no governance-zone signal, so the default is not rewritten automatically.
 
 ## Authentication
 
@@ -169,7 +184,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 ### How it works
 
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
-2. Installs CoCo CLI from the specified channel.
+2. Installs CoCo CLI from the specified channel, unless `cortex-binary` is set or `cortex` is already on `PATH`.
 3. Pins a specific version if `cli-version` is set.
 4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
 
@@ -178,9 +193,11 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
-| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. |
+| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. Pinning reaches the network. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
+| `oidc-audience` | `snowflakecomputing.com` | `aud` claim when this action mints the OIDC token. AWS ISO callers must override this. |
 
 ### Outputs
 

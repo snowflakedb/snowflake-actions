@@ -31,6 +31,16 @@ inputs:
     description: "GitHub branch, tag, or commit to install the Snowflake CLI from (if set, installs from GitHub; otherwise, installs from PyPI)"
     required: false
 
+  cli-artifact:
+    description: >-
+      Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
+      Installed with uv --offline (no PyPI). uv and python3 must already be on PATH.
+      Mutually exclusive with cli-version and custom-github-ref. Air-gapped runners
+      can instead preinstall snow on PATH and leave cli-version, custom-github-ref,
+      and cli-artifact empty to skip the download entirely.
+    required: false
+    default: ""
+
   # --- Cortex Code CLI options -------------------------------------------
   cortex-channel:
     description: "Cortex Code CLI install channel: stable or beta"
@@ -41,6 +51,14 @@ inputs:
     description: "Cortex Code CLI version to install (e.g. 1.5.2). Use 'latest' for the newest in the channel."
     required: false
     default: "latest"
+
+  cortex-binary:
+    description: >-
+      Path to a local Cortex Code executable. When set, the action copies it onto PATH
+      and does not download the installer from ai.snowflake.com. Also skipped when
+      cortex is already on PATH and cortex-version is latest.
+    required: false
+    default: ""
 
   connection-name:
     description: "Connection name written to connections.toml when configuring the Cortex Code CLI from OIDC"
@@ -77,6 +95,15 @@ inputs:
     required: false
     default: "SNOWFLAKE_TOKEN"
 
+  oidc-audience:
+    description: >-
+      Audience (aud) claim requested for the GitHub OIDC token. Defaults to
+      snowflakecomputing.com, which commercial accounts expect. AWS ISO and other
+      in-zone accounts must set this to the audience their Snowflake OIDC security
+      integration expects. There is no automatic governance-zone default.
+    required: false
+    default: "snowflakecomputing.com"
+
 outputs:
   snowflake-cli-version:
     description: "Installed Snowflake CLI version (empty if snowflake-cli was not installed)"
@@ -104,15 +131,28 @@ runs:
     # scopes the pin to the isolated tool environment without touching the job.
     #
     # Keep the pinned setup-uv SHA in sync with snowflake-cli/action.yml.
-    - if: ${{ inputs.snowflake-cli == 'true' }}
-      uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
-
-    - name: Install Snowflake CLI
+    # setup-uv downloads uv from GitHub Releases, so air-gapped runs skip it
+    # when snow is already on PATH or cli-artifact is set.
+    - name: Plan Snowflake CLI install
+      id: snow-plan
       if: ${{ inputs.snowflake-cli == 'true' }}
       shell: bash
       env:
         CLI_VERSION: ${{ inputs.cli-version }}
         CUSTOM_GITHUB_REF: ${{ inputs.custom-github-ref }}
+        CLI_ARTIFACT: ${{ inputs.cli-artifact }}
+      run: bash $GITHUB_ACTION_PATH/scripts/plan-snowflake-cli-install.sh
+
+    - if: ${{ inputs.snowflake-cli == 'true' && steps.snow-plan.outputs.skip_uv_setup != 'true' }}
+      uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
+
+    - name: Install Snowflake CLI
+      if: ${{ inputs.snowflake-cli == 'true' && steps.snow-plan.outputs.skip_install != 'true' }}
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        CUSTOM_GITHUB_REF: ${{ inputs.custom-github-ref }}
+        CLI_ARTIFACT: ${{ inputs.cli-artifact }}
       run: bash $GITHUB_ACTION_PATH/scripts/install-snowflake-cli.sh
 
     - name: Set up config.toml
@@ -127,6 +167,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/scripts/configure-snowflake-oidc.sh
 
     - name: Output Snowflake CLI version
@@ -158,10 +199,11 @@ runs:
       shell: bash
       env:
         CORTEX_CHANNEL: ${{ inputs.cortex-channel }}
+        CORTEX_BINARY: ${{ inputs.cortex-binary }}
       run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/install-cortex.sh
 
     - name: Pin specific Cortex Code version
-      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-version != 'latest' }}
+      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-version != 'latest' && inputs.cortex-binary == '' }}
       shell: bash
       env:
         CORTEX_VERSION: ${{ inputs.cortex-version }}
@@ -172,6 +214,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/scripts/oidc-token.sh
 
     - name: Configure Cortex Code connection

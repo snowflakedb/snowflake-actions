@@ -16,6 +16,15 @@ inputs:
     required: false
     default: "latest"
 
+  cortex-binary:
+    description: >-
+      Path to a local Cortex Code executable. When set, the action copies it onto PATH
+      and does not download the installer from ai.snowflake.com. The download is also
+      skipped when cortex is already on PATH. Pinning cli-version still reaches the
+      network, so leave it at latest on an air-gapped runner.
+    required: false
+    default: ""
+
   connection-name:
     description: "Connection name to write in connections.toml when configuring from OIDC env vars"
     required: false
@@ -30,6 +39,14 @@ inputs:
     description: "Env var name containing the OIDC token. Must match the token env var set by use-oidc (or by a parent action, if it set one)."
     required: false
     default: "SNOWFLAKE_TOKEN"
+
+  oidc-audience:
+    description: >-
+      Audience (aud) claim requested when this action mints the GitHub OIDC token.
+      Defaults to snowflakecomputing.com. AWS ISO and other in-zone accounts must
+      set this to the audience their Snowflake OIDC security integration expects.
+    required: false
+    default: "snowflakecomputing.com"
 
   prompt:
     description: "Optional inline Cortex Code prompt string to run after setup. Mutually exclusive with prompt-file. Leave both empty to install and configure only."
@@ -69,10 +86,11 @@ runs:
       shell: bash
       env:
         CORTEX_CHANNEL: ${{ inputs.cli-channel }}
+        CORTEX_BINARY: ${{ inputs.cortex-binary }}
       run: bash $GITHUB_ACTION_PATH/scripts/install-cortex.sh
 
     - name: Pin specific version
-      if: ${{ inputs.cli-version != 'latest' }}
+      if: ${{ inputs.cli-version != 'latest' && inputs.cortex-binary == '' }}
       shell: bash
       env:
         CORTEX_VERSION: ${{ inputs.cli-version }}
@@ -86,6 +104,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/../scripts/oidc-token.sh
 
     - name: Configure connection
