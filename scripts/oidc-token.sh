@@ -11,7 +11,9 @@
 # and idempotency live in exactly one place and neither path needs `snow`.
 #
 # Idempotent: if a prior step (e.g. the snow-install OIDC path) already exported
-# the token, it is reused rather than re-minted.
+# the token, it is reused rather than re-minted. Reuse writes SNOWFLAKE_AUDIENCE
+# before returning, and only when that token's aud matches the audience requested
+# on this step.
 #
 # Requires `permissions: id-token: write` on the job.
 #
@@ -24,35 +26,70 @@ set -euo pipefail
 
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
 AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
+# GITHUB_ENV is split on CR and LF. A carriage return would turn the rest of
+# the line into another assignment.
 case "$AUDIENCE" in
-    *$'\n'*)
+    *$'\n'*|*$'\r'*)
         echo "::error::oidc-audience must be a single line"
         exit 1
         ;;
 esac
-
-# Reuse a token that's already in the env rather than minting again. This covers
-# the intended case (the snow-install and Cortex Code paths both run with
-# use-oidc, so one mints and the other reuses) and also a caller who set the
-# token themselves — we can't tell them apart, and reusing is correct for both.
-# Mask it regardless of source so a caller-supplied token is scrubbed from logs
-# too, matching the mint path below.
-if [ -n "${!TOKEN_NAME_UPPER:-}" ]; then
-    echo "::add-mask::${!TOKEN_NAME_UPPER}"
-    echo "OIDC token already present in \$${TOKEN_NAME_UPPER}; reusing it."
-    exit 0
-fi
-
-if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-    echo "::error::use-oidc is set but the GitHub OIDC endpoint is unavailable. Add 'permissions: id-token: write' to the job."
-    exit 1
-fi
 
 # Parse JSON and encode the audience with the stdlib. Prefer python3, falling
 # back to python (Windows runners expose the interpreter as `python`).
 PYTHON="$(command -v python3 || command -v python || true)"
 if [ -z "$PYTHON" ]; then
     echo "::error::No python interpreter (python3 or python) found to parse the OIDC token."
+    exit 1
+fi
+
+# Reuse a token that's already in the env rather than minting again. This covers
+# the intended case (the snow-install and Cortex Code paths both run with
+# use-oidc, so one mints and the other reuses). The Cortex steps call this
+# script directly, so the audience has to be published here, before the return.
+# Reuse keeps the existing token, so that token has to have been minted for
+# this same audience.
+if [ -n "${!TOKEN_NAME_UPPER:-}" ]; then
+    echo "::add-mask::${!TOKEN_NAME_UPPER}"
+    aud_status="$("$PYTHON" -c '
+import base64, json, sys
+token, expected = sys.argv[1], sys.argv[2]
+parts = token.split(".")
+if len(parts) < 2:
+    print("not-jwt")
+    raise SystemExit(0)
+payload = parts[1]
+payload += "=" * (-len(payload) % 4)
+try:
+    data = json.loads(base64.urlsafe_b64decode(payload))
+except Exception:
+    print("not-jwt")
+    raise SystemExit(0)
+aud = data.get("aud")
+if isinstance(aud, list):
+    match = expected in aud
+else:
+    match = aud == expected
+print("match" if match else "mismatch")
+' "${!TOKEN_NAME_UPPER}" "$AUDIENCE")"
+    case "$aud_status" in
+        match) ;;
+        mismatch)
+            echo "::error::Existing ${TOKEN_NAME_UPPER} was minted for a different audience than oidc-audience. Refusing to reuse it."
+            exit 1
+            ;;
+        *)
+            echo "::error::Existing ${TOKEN_NAME_UPPER} is not a JWT, so its audience cannot be checked. Refusing to reuse it."
+            exit 1
+            ;;
+    esac
+    echo "SNOWFLAKE_AUDIENCE=${AUDIENCE}" >> "$GITHUB_ENV"
+    echo "OIDC token already present in \$${TOKEN_NAME_UPPER}; reusing it."
+    exit 0
+fi
+
+if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+    echo "::error::use-oidc is set but the GitHub OIDC endpoint is unavailable. Add 'permissions: id-token: write' to the job."
     exit 1
 fi
 # GitHub takes the audience as a query parameter. Encode it so an in-zone

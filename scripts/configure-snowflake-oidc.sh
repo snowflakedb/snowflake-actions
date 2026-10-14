@@ -20,8 +20,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
+# GITHUB_ENV is split on CR and LF. A carriage return would turn the rest of
+# the line into another assignment.
 case "$AUDIENCE" in
-    *$'\n'*)
+    *$'\n'*|*$'\r'*)
         echo "::error::oidc-audience must be a single line"
         exit 1
         ;;

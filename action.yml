@@ -19,7 +19,11 @@ inputs:
 
   # --- Snowflake CLI options ---------------------------------------------
   cli-version:
-    description: "Snowflake CLI version (by default, installs the latest version)"
+    description: >-
+      Snowflake CLI version to install (e.g. 3.20.0). An omitted value is empty.
+      Empty reuses a snow already on PATH and does not download. If snow is not
+      on PATH, empty installs the latest release from PyPI. The string latest
+      always installs from PyPI.
     required: false
 
   default-config-file-path:
@@ -55,8 +59,10 @@ inputs:
   cortex-binary:
     description: >-
       Path to a local Cortex Code executable. When set, the action copies it onto PATH
-      and does not download the installer from ai.snowflake.com. Also skipped when
-      cortex is already on PATH and cortex-version is latest.
+      and does not download the installer from ai.snowflake.com. The download is also
+      skipped when cortex is already on PATH. A cortex-version other than latest fails
+      in both of those cases, because pinning runs cortex update and that reaches the
+      network. cortex-binary cannot be combined with a pinned cortex-version.
     required: false
     default: ""
 
@@ -195,6 +201,7 @@ runs:
       run: bash $GITHUB_ACTION_PATH/scripts/validate-cortex-inputs.sh
 
     - name: Install Cortex Code CLI
+      id: cortex-install
       if: ${{ inputs.cortex-code == 'true' }}
       shell: bash
       env:
@@ -203,10 +210,12 @@ runs:
       run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/install-cortex.sh
 
     - name: Pin specific Cortex Code version
-      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-version != 'latest' && inputs.cortex-binary == '' }}
+      if: ${{ inputs.cortex-code == 'true' && inputs.cortex-version != 'latest' }}
       shell: bash
       env:
         CORTEX_VERSION: ${{ inputs.cortex-version }}
+        CORTEX_BINARY: ${{ inputs.cortex-binary }}
+        CORTEX_INSTALL_MODE: ${{ steps.cortex-install.outputs.install_mode }}
       run: bash $GITHUB_ACTION_PATH/cortex-code/scripts/pin-cortex-version.sh
 
     - name: Set up workload identity authentication (Cortex Code)

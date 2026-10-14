@@ -17,7 +17,11 @@ branding:
 
 inputs:
   cli-version:
-    description: "Snowflake CLI version (by default, installs the latest version)"
+    description: >-
+      Snowflake CLI version to install (e.g. 3.20.0). An omitted value is empty.
+      Empty reuses a snow already on PATH and does not download. If snow is not
+      on PATH, empty installs the latest release from PyPI. The string latest
+      always installs from PyPI.
     required: false
 
   default-config-file-path:

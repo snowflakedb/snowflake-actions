@@ -43,14 +43,14 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `cli-version` | latest | CLI version to install (e.g. `3.20.0`). Empty reuses a `snow` already on `PATH`. `latest` always installs from PyPI. |
+| `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
 | `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
 | `oidc-audience` | `snowflakecomputing.com` | `aud` claim for the OIDC token. AWS ISO callers must override this. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
 | `cli-artifact` | none | Local wheel, sdist, or directory of wheels. Installed offline. |
-| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. A pinned `cortex-version` fails in both cases. |
 
 - `cli-version`, `custom-github-ref`, and `cli-artifact` are mutually exclusive.
 - `use-oidc` needs CLI `3.11+` and `id-token: write`.
@@ -65,7 +65,7 @@ On a runner with no route to `pypi.org`, `github.com`, or `ai.snowflake.com`:
 
 - Preinstall `snow` on `PATH` and leave `cli-version`, `custom-github-ref`, and `cli-artifact` empty. The action reuses that binary and does not download `uv`.
 - Or set `cli-artifact` to a wheel, sdist, or a directory of wheels. `uv` and `python3` must already be on the runner. The install is `uv tool install --offline` and does not contact PyPI. Put dependency wheels next to the CLI wheel (or in that directory) so `--find-links` can resolve them.
-- For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave the version at `latest`. The action does not curl `ai.snowflake.com`. Pinning a Cortex version still reaches the network.
+- For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave `cortex-version` at `latest`. The action does not curl `ai.snowflake.com`. A `cortex-version` other than `latest` fails in both of those cases, because pinning runs `cortex update` and that reaches the network. `cortex-binary` cannot be combined with a pinned `cortex-version`. Setting root `cli-version` to `latest` still installs the Snowflake CLI from PyPI.
 
 `oidc-audience` defaults to `snowflakecomputing.com`. An AWS ISO (or other in-zone) account must set it to the audience configured on its Snowflake OIDC security integration. The action requests that value as the GitHub OIDC token `aud` claim. These packages have no governance-zone signal, so the default is not rewritten automatically.
 
@@ -185,7 +185,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
 2. Installs CoCo CLI from the specified channel, unless `cortex-binary` is set or `cortex` is already on `PATH`.
-3. Pins a specific version if `cli-version` is set.
+3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. Fails before `cortex update` when `cortex-binary` is set or `cortex` was already on `PATH`.
 4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
 
 ### Inputs
@@ -193,8 +193,8 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
-| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. Pinning reaches the network. |
-| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. |
+| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` runs `cortex update` after a fresh download, which reaches the network, and fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
 | `oidc-audience` | `snowflakecomputing.com` | `aud` claim when this action mints the OIDC token. AWS ISO callers must override this. |

@@ -48,6 +48,22 @@ inputs:
   snowflake-user:
     description: "Snowflake username for OIDC authentication"
     required: true
+  cli-artifact:
+    description: >-
+      Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
+      Forwarded to the Snowflake CLI setup step and installed offline. uv and
+      python3 must already be on PATH. Air-gapped runners can instead
+      preinstall snow on PATH and leave this empty.
+    required: false
+    default: ""
+  oidc-audience:
+    description: >-
+      Audience (aud) claim requested for the GitHub OIDC token. Forwarded to
+      the Snowflake CLI setup step. Defaults to snowflakecomputing.com. AWS ISO
+      and other in-zone accounts must set this to the audience their Snowflake
+      OIDC security integration expects.
+    required: false
+    default: "snowflakecomputing.com"
 
 outputs:
   result:
@@ -70,6 +86,8 @@ runs:
       uses: snowflakedb/snowflake-actions@v3
       with:
         use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+        cli-artifact: ${{ inputs.cli-artifact }}
 
     - name: Read manifest target
       id: read_manifest
