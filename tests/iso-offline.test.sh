@@ -37,34 +37,74 @@ echo "snow 9.9.9"
 EOF
 chmod +x "$TEST_ROOT/bin/snow"
 
+unset SNOWFLAKE_CLI_AIR_GAPPED SF_CICD_CLI_SOURCE || true
 PLAN_OUT="$TEST_ROOT/plan-skip.out"
+PLAN_ENV="$TEST_ROOT/plan-skip.env"
+: > "$PLAN_ENV"
 GITHUB_PATH="$TEST_ROOT/plan-skip.path" \
 GITHUB_OUTPUT="$PLAN_OUT" \
+GITHUB_ENV="$PLAN_ENV" \
     bash "$REPO_ROOT/scripts/plan-snowflake-cli-install.sh" \
     || fail "plan: preinstalled snow should succeed"
 grep -qx 'skip_install=true' "$PLAN_OUT" || fail "plan: expected skip_install=true"
 grep -qx 'skip_uv_setup=true' "$PLAN_OUT" || fail "plan: expected skip_uv_setup=true"
 grep -qx "$TEST_ROOT/bin" "$TEST_ROOT/plan-skip.path" \
     || fail "plan: did not publish the preinstalled snow directory"
-echo "PASS: preinstalled snow skips uv and the CLI download"
+grep -qx 'SNOWFLAKE_CLI_AIR_GAPPED=true' "$PLAN_ENV" \
+    || fail "plan: preinstalled snow did not export SNOWFLAKE_CLI_AIR_GAPPED"
+echo "PASS: preinstalled snow skips uv and the CLI download and exports air-gapped mode"
+
+# A snow this job already installed from PyPI must not be flipped.
+PLAN_OUT="$TEST_ROOT/plan-reuse-network.out"
+PLAN_ENV="$TEST_ROOT/plan-reuse-network.env"
+: > "$PLAN_ENV"
+SF_CICD_CLI_SOURCE=network \
+GITHUB_PATH="$TEST_ROOT/plan-reuse-network.path" \
+GITHUB_OUTPUT="$PLAN_OUT" \
+GITHUB_ENV="$PLAN_ENV" \
+    bash "$REPO_ROOT/scripts/plan-snowflake-cli-install.sh" \
+    || fail "plan: reuse after a network install should succeed"
+grep -qx 'skip_install=true' "$PLAN_OUT" || fail "plan: network reuse should still skip install"
+grep -q 'SNOWFLAKE_CLI_AIR_GAPPED=' "$PLAN_ENV" \
+    && fail "plan: network reuse exported SNOWFLAKE_CLI_AIR_GAPPED"
+echo "PASS: reusing a CLI installed from the network does not set air-gapped mode"
+
+# An explicit false is an opt-out.
+PLAN_ENV="$TEST_ROOT/plan-explicit-false.env"
+: > "$PLAN_ENV"
+SNOWFLAKE_CLI_AIR_GAPPED=false \
+GITHUB_OUTPUT="$TEST_ROOT/plan-explicit-false.out" \
+GITHUB_ENV="$PLAN_ENV" \
+    bash "$REPO_ROOT/scripts/plan-snowflake-cli-install.sh" \
+    || fail "plan: explicit SNOWFLAKE_CLI_AIR_GAPPED=false should succeed"
+[ ! -s "$PLAN_ENV" ] || fail "plan: explicit false was overwritten"
+echo "PASS: an explicit SNOWFLAKE_CLI_AIR_GAPPED is left unchanged"
 
 # --- plan: explicit latest does not skip ---
 PLAN_OUT="$TEST_ROOT/plan-latest.out"
-CLI_VERSION=latest GITHUB_OUTPUT="$PLAN_OUT" \
+PLAN_ENV="$TEST_ROOT/plan-latest.env"
+: > "$PLAN_ENV"
+CLI_VERSION=latest GITHUB_OUTPUT="$PLAN_OUT" GITHUB_ENV="$PLAN_ENV" \
     bash "$REPO_ROOT/scripts/plan-snowflake-cli-install.sh" \
     || fail "plan: cli-version=latest should succeed"
 grep -qx 'skip_install=false' "$PLAN_OUT" || fail "plan: latest should not skip install"
 grep -qx 'skip_uv_setup=false' "$PLAN_OUT" || fail "plan: latest should not skip uv"
+grep -q 'SNOWFLAKE_CLI_AIR_GAPPED=' "$PLAN_ENV" \
+    && fail "plan: cli-version=latest exported SNOWFLAKE_CLI_AIR_GAPPED"
 echo "PASS: cli-version=latest still downloads"
 
 # --- plan: cli-artifact skips uv setup and refuses a version pin ---
 PLAN_OUT="$TEST_ROOT/plan-artifact.out"
-CLI_ARTIFACT=./dist/snow.whl GITHUB_OUTPUT="$PLAN_OUT" \
+PLAN_ENV="$TEST_ROOT/plan-artifact.env"
+: > "$PLAN_ENV"
+CLI_ARTIFACT=./dist/snow.whl GITHUB_OUTPUT="$PLAN_OUT" GITHUB_ENV="$PLAN_ENV" \
     bash "$REPO_ROOT/scripts/plan-snowflake-cli-install.sh" \
     || fail "plan: cli-artifact should succeed"
 grep -qx 'skip_install=false' "$PLAN_OUT" || fail "plan: artifact should still install"
 grep -qx 'skip_uv_setup=true' "$PLAN_OUT" || fail "plan: artifact should skip uv setup"
-echo "PASS: cli-artifact skips the uv download"
+grep -qx 'SNOWFLAKE_CLI_AIR_GAPPED=true' "$PLAN_ENV" \
+    || fail "plan: cli-artifact did not export SNOWFLAKE_CLI_AIR_GAPPED"
+echo "PASS: cli-artifact skips the uv download and exports air-gapped mode"
 
 set +e
 CLI_VERSION=3.20.0 CLI_ARTIFACT=./dist/snow.whl GITHUB_OUTPUT="$TEST_ROOT/plan-conflict.out" \
@@ -81,9 +121,15 @@ echo "uv should not have been called: $*" >&2
 exit 99
 EOF
 chmod +x "$TEST_ROOT/bin/uv"
-bash "$REPO_ROOT/scripts/install-snowflake-cli.sh" \
+INSTALL_ENV="$TEST_ROOT/install-preinstalled.env"
+: > "$INSTALL_ENV"
+unset SNOWFLAKE_CLI_AIR_GAPPED SF_CICD_CLI_SOURCE || true
+GITHUB_ENV="$INSTALL_ENV" \
+    bash "$REPO_ROOT/scripts/install-snowflake-cli.sh" \
     || fail "install: preinstalled snow should succeed without uv"
-echo "PASS: install script reuses snow already on PATH"
+grep -qx 'SNOWFLAKE_CLI_AIR_GAPPED=true' "$INSTALL_ENV" \
+    || fail "install: preinstalled snow did not export SNOWFLAKE_CLI_AIR_GAPPED"
+echo "PASS: install script reuses snow already on PATH and exports air-gapped mode"
 
 # --- install: explicit latest reaches uv ---
 rm -f "$TEST_ROOT/bin/snow"
@@ -100,11 +146,18 @@ chmod +x "$HOME/.local/bin/snow"
 EOF
 chmod +x "$TEST_ROOT/bin/uv"
 UV_LOG="$TEST_ROOT/uv-latest.log"
-CLI_VERSION=latest UV_LOG="$UV_LOG" \
+INSTALL_ENV="$TEST_ROOT/install-latest.env"
+: > "$INSTALL_ENV"
+unset SNOWFLAKE_CLI_AIR_GAPPED SF_CICD_CLI_SOURCE || true
+CLI_VERSION=latest UV_LOG="$UV_LOG" GITHUB_ENV="$INSTALL_ENV" \
     bash "$REPO_ROOT/scripts/install-snowflake-cli.sh" \
     || fail "install: latest should call uv"
 grep -q 'tool install --python 3.11 snowflake-cli' "$UV_LOG" \
     || fail "install: latest did not call uv tool install"
+grep -qx 'SF_CICD_CLI_SOURCE=network' "$INSTALL_ENV" \
+    || fail "install: latest did not record a network install"
+grep -q 'SNOWFLAKE_CLI_AIR_GAPPED=' "$INSTALL_ENV" \
+    && fail "install: latest exported SNOWFLAKE_CLI_AIR_GAPPED"
 echo "PASS: cli-version=latest installs from PyPI via uv"
 
 # --- install: local wheel is offline and uses the wheel's directory as find-links ---
@@ -112,14 +165,22 @@ rm -f "$HOME/.local/bin/snow" "$TEST_ROOT/bin/snow"
 mkdir -p "$TEST_ROOT/wheels"
 printf 'not a real wheel' > "$TEST_ROOT/wheels/snowflake_cli-1.2.3-py3-none-any.whl"
 UV_LOG="$TEST_ROOT/uv-wheel.log"
+INSTALL_ENV="$TEST_ROOT/install-wheel.env"
 : > "$UV_LOG"
+: > "$INSTALL_ENV"
+unset SNOWFLAKE_CLI_AIR_GAPPED SF_CICD_CLI_SOURCE || true
 CLI_ARTIFACT="$TEST_ROOT/wheels/snowflake_cli-1.2.3-py3-none-any.whl" UV_LOG="$UV_LOG" \
+GITHUB_ENV="$INSTALL_ENV" \
     bash "$REPO_ROOT/scripts/install-snowflake-cli.sh" \
     || fail "install: local wheel should succeed"
 grep -q -- '--offline' "$UV_LOG" || fail "install: wheel path was not offline"
 grep -q -- "--find-links ${TEST_ROOT}/wheels" "$UV_LOG" \
     || fail "install: wheel path did not pass the sibling directory as find-links"
 grep -q 'pypi' "$UV_LOG" && fail "install: wheel path mentioned pypi"
+grep -qx 'SNOWFLAKE_CLI_AIR_GAPPED=true' "$INSTALL_ENV" \
+    || fail "install: wheel path did not export SNOWFLAKE_CLI_AIR_GAPPED"
+grep -q 'SF_CICD_CLI_SOURCE=network' "$INSTALL_ENV" \
+    && fail "install: wheel path recorded a network install"
 echo "PASS: cli-artifact installs offline from the local wheel"
 
 # --- install: missing uv with an artifact fails before any download ---
@@ -169,7 +230,7 @@ echo "PASS: oidc-token requests the configured audience"
 CURL_LOG="$TEST_ROOT/curl-default.log"
 GITHUB_ENV="$TEST_ROOT/github-default.env"
 : > "$GITHUB_ENV"
-unset SNOWFLAKE_AUDIENCE || true
+unset SNOWFLAKE_AUDIENCE OIDC_AUDIENCE SNOWFLAKE_CLI_AIR_GAPPED || true
 ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
 ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
 OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
@@ -180,6 +241,84 @@ GITHUB_ENV="$GITHUB_ENV" \
 grep -q 'audience=snowflakecomputing.com' "$CURL_LOG" \
     || fail "oidc-token: default audience was not snowflakecomputing.com"
 echo "PASS: default OIDC audience is unchanged"
+
+# Air-gapped mode refuses to invent the commercial audience. A job-level
+# SNOWFLAKE_AUDIENCE still wins, and an explicit OIDC_AUDIENCE wins over that.
+unset SNOWFLAKE_CLI_AIR_GAPPED || true
+CURL_LOG="$TEST_ROOT/curl-airgap.log"
+: > "$CURL_LOG"
+GITHUB_ENV="$TEST_ROOT/github-airgap.env"
+: > "$GITHUB_ENV"
+set +e
+SNOWFLAKE_CLI_AIR_GAPPED=true \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+CURL_LOG="$CURL_LOG" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" >"$TEST_ROOT/oidc-airgap.out" 2>&1
+airgap_rc=$?
+set -e
+[ "$airgap_rc" -ne 0 ] || fail "oidc-token: air-gapped with no audience should fail"
+grep -q 'SNOWFLAKE_AUDIENCE is not set' "$TEST_ROOT/oidc-airgap.out" \
+    || fail "oidc-token: air-gapped error did not require an audience"
+[ ! -s "$CURL_LOG" ] || fail "oidc-token: air-gapped failure still called curl"
+echo "PASS: air-gapped oidc-token refuses the commercial default"
+
+CURL_LOG="$TEST_ROOT/curl-airgap-env.log"
+GITHUB_ENV="$TEST_ROOT/github-airgap-env.env"
+: > "$GITHUB_ENV"
+SNOWFLAKE_CLI_AIR_GAPPED=true \
+SNOWFLAKE_AUDIENCE="iso.example" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+CURL_LOG="$CURL_LOG" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" \
+    || fail "oidc-token: air-gapped with SNOWFLAKE_AUDIENCE should succeed"
+grep -q 'audience=iso.example' "$CURL_LOG" \
+    || fail "oidc-token: air-gapped run did not use SNOWFLAKE_AUDIENCE"
+echo "PASS: air-gapped oidc-token keeps a job-level SNOWFLAKE_AUDIENCE"
+
+CURL_LOG="$TEST_ROOT/curl-airgap-input.log"
+GITHUB_ENV="$TEST_ROOT/github-airgap-input.env"
+: > "$GITHUB_ENV"
+SNOWFLAKE_CLI_AIR_GAPPED=true \
+SNOWFLAKE_AUDIENCE="job.example" \
+OIDC_AUDIENCE="step.example" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+CURL_LOG="$CURL_LOG" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" \
+    || fail "oidc-token: explicit OIDC_AUDIENCE should succeed"
+grep -q 'audience=step.example' "$CURL_LOG" \
+    || fail "oidc-token: OIDC_AUDIENCE did not win over SNOWFLAKE_AUDIENCE"
+echo "PASS: oidc-audience input wins over the job audience"
+
+set +e
+SNOWFLAKE_CLI_AIR_GAPPED=yes \
+GITHUB_ENV="$TEST_ROOT/github-airgap-bad.env" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" >"$TEST_ROOT/oidc-airgap-bad.out" 2>&1
+airgap_bad_rc=$?
+set -e
+[ "$airgap_bad_rc" -ne 0 ] || fail "oidc-token: invalid SNOWFLAKE_CLI_AIR_GAPPED should fail"
+grep -q 'true, false, 1, or 0' "$TEST_ROOT/oidc-airgap-bad.out" \
+    || fail "oidc-token: invalid air-gapped value was not rejected"
+echo "PASS: oidc-token rejects a non-boolean SNOWFLAKE_CLI_AIR_GAPPED"
+
+set +e
+SNOWFLAKE_CLI_AIR_GAPPED=true \
+GITHUB_ENV="$TEST_ROOT/configure-airgap.env" \
+    bash "$REPO_ROOT/scripts/configure-snowflake-oidc.sh" >"$TEST_ROOT/configure-airgap.out" 2>&1
+configure_airgap_rc=$?
+set -e
+[ "$configure_airgap_rc" -ne 0 ] || fail "configure: air-gapped with no audience should fail"
+grep -q 'SNOWFLAKE_AUDIENCE is not set' "$TEST_ROOT/configure-airgap.out" \
+    || fail "configure: air-gapped error did not require an audience"
+echo "PASS: configure-snowflake-oidc refuses the commercial default when air-gapped"
 
 # A carriage return must not reach GITHUB_ENV. The runner splits that file on
 # CR as well as LF.

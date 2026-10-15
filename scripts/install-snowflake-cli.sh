@@ -26,6 +26,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=cli-airgap-env.sh
+source "${SCRIPT_DIR}/cli-airgap-env.sh"
+
 CLI_VERSION="${CLI_VERSION:-}"
 CUSTOM_GITHUB_REF="${CUSTOM_GITHUB_REF:-}"
 CLI_ARTIFACT="${CLI_ARTIFACT:-}"
@@ -56,6 +60,7 @@ if [ -z "$CLI_VERSION" ] && [ -z "$CUSTOM_GITHUB_REF" ] && [ -z "$CLI_ARTIFACT" 
     echo "Snowflake CLI already on PATH ($(command -v snow)); skipping download."
     snow --version
     publish_path
+    publish_air_gapped_cli_env
     exit 0
 fi
 
@@ -80,6 +85,7 @@ if [ -n "$CLI_ARTIFACT" ]; then
         links="$(cd "$(dirname "$CLI_ARTIFACT")" && pwd)"
         uv tool install --offline --python "$python" --find-links "$links" "$CLI_ARTIFACT"
     fi
+    publish_air_gapped_cli_env
 elif [ -n "$CUSTOM_GITHUB_REF" ]; then
     echo "Installing Snowflake CLI from snowflakedb/snowflake-cli@${CUSTOM_GITHUB_REF}"
     uv tool install --python 3.11 "git+https://github.com/snowflakedb/snowflake-cli.git@${CUSTOM_GITHUB_REF}"
@@ -89,6 +95,10 @@ elif [ -n "$CLI_VERSION" ] && [ "$CLI_VERSION" != "latest" ]; then
 else
     echo "Installing latest Snowflake CLI release"
     uv tool install --python 3.11 snowflake-cli
+fi
+
+if [ -z "$CLI_ARTIFACT" ]; then
+    publish_network_cli_source
 fi
 
 publish_path

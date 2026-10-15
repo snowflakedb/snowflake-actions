@@ -13,6 +13,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=cli-airgap-env.sh
+source "${SCRIPT_DIR}/cli-airgap-env.sh"
+
 CLI_VERSION="${CLI_VERSION:-}"
 CUSTOM_GITHUB_REF="${CUSTOM_GITHUB_REF:-}"
 CLI_ARTIFACT="${CLI_ARTIFACT:-}"
@@ -44,6 +48,13 @@ elif [ -z "$CLI_VERSION" ] && [ -z "$CUSTOM_GITHUB_REF" ] && command -v snow >/d
     if [ -n "${GITHUB_PATH:-}" ]; then
         dirname "$(command -v snow)" >> "$GITHUB_PATH"
     fi
+fi
+
+# Offline for this job: a local artifact, or a binary the runner already had.
+# A snow installed from PyPI earlier in the job is SF_CICD_CLI_SOURCE=network
+# and is not treated as air-gapped.
+if [ -n "$CLI_ARTIFACT" ] || [ "$skip_install" = true ]; then
+    publish_air_gapped_cli_env
 fi
 
 {

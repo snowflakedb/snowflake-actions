@@ -43,13 +43,13 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
+| `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. That reuse exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps, unless the variable is already set or an earlier step installed the CLI from the network. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
 | `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
-| `oidc-audience` | `snowflakecomputing.com` | `aud` claim for the OIDC token. AWS ISO callers must override this. |
+| `oidc-audience` | (omitted) | `aud` claim for the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set. Otherwise the action requests `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true, in which case `oidc-audience` or `SNOWFLAKE_AUDIENCE` must be set. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
-| `cli-artifact` | none | Local wheel, sdist, or directory of wheels. Installed offline. |
+| `cli-artifact` | none | Local wheel, sdist, or directory of wheels. Installed offline, and exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps unless that variable is already set. |
 | `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. A pinned `cortex-version` fails in both cases. |
 
 - `cli-version`, `custom-github-ref`, and `cli-artifact` are mutually exclusive.
@@ -63,11 +63,13 @@ GitHub-hosted runners are unchanged: the action downloads `uv` and installs the 
 
 On a runner with no route to `pypi.org`, `github.com`, or `ai.snowflake.com`:
 
-- Preinstall `snow` on `PATH` and leave `cli-version`, `custom-github-ref`, and `cli-artifact` empty. The action reuses that binary and does not download `uv`.
-- Or set `cli-artifact` to a wheel, sdist, or a directory of wheels. `uv` and `python3` must already be on the runner. The install is `uv tool install --offline` and does not contact PyPI. Put dependency wheels next to the CLI wheel (or in that directory) so `--find-links` can resolve them.
+- Preinstall `snow` on `PATH` and leave `cli-version`, `custom-github-ref`, and `cli-artifact` empty. The action reuses that binary and does not download `uv`. It exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps.
+- Or set `cli-artifact` to a wheel, sdist, or a directory of wheels. `uv` and `python3` must already be on the runner. The install is `uv tool install --offline` and does not contact PyPI. Put dependency wheels next to the CLI wheel (or in that directory) so `--find-links` can resolve them. This path exports `SNOWFLAKE_CLI_AIR_GAPPED=true` as well.
 - For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave `cortex-version` at `latest`. The action does not curl `ai.snowflake.com`. A `cortex-version` other than `latest` fails in both of those cases, because pinning runs `cortex update` and that reaches the network. `cortex-binary` cannot be combined with a pinned `cortex-version`. Setting root `cli-version` to `latest` still installs the Snowflake CLI from PyPI.
 
-`oidc-audience` defaults to `snowflakecomputing.com`. An AWS ISO (or other in-zone) account must set it to the audience configured on its Snowflake OIDC security integration. The action requests that value as the GitHub OIDC token `aud` claim. These packages have no governance-zone signal, so the default is not rewritten automatically.
+Either offline path exports `SNOWFLAKE_CLI_AIR_GAPPED=true` into the job environment, so later `snow` commands run air-gapped without a separate flag: no auto-upgrade, no public template download, and no commercial OIDC audience default. An explicit `SNOWFLAKE_CLI_AIR_GAPPED` is left unchanged, so set it to `false` to reuse a preinstalled binary without that mode. A CLI this job already installed from PyPI or GitHub is not flipped when a later step only reuses it.
+
+An omitted `oidc-audience` stays empty. Empty uses `SNOWFLAKE_AUDIENCE` when the job already set it, and otherwise requests `snowflakecomputing.com`. With `SNOWFLAKE_CLI_AIR_GAPPED=true` — set by you, or exported by an offline setup above — that commercial default is refused: the step fails until `oidc-audience` or `SNOWFLAKE_AUDIENCE` is set to the audience on the Snowflake OIDC security integration. These packages have no governance-zone signal, so the audience is not rewritten automatically.
 
 ## Authentication
 
@@ -197,7 +199,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
-| `oidc-audience` | `snowflakecomputing.com` | `aud` claim when this action mints the OIDC token. AWS ISO callers must override this. |
+| `oidc-audience` | (omitted) | `aud` claim when this action mints the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true. |
 
 ### Outputs
 

@@ -6,9 +6,10 @@
 # This is the single token-minting path for the whole repo: the Cortex Code
 # action calls it directly, and the snow-install path calls it via
 # configure-snowflake-oidc.sh. It replaces `snow auth oidc read-token
-# --type=github` — both request the GitHub-issued JWT for SNOWFLAKE_AUDIENCE
-# (default snowflakecomputing.com) from the Actions OIDC endpoint — so minting, masking,
-# and idempotency live in exactly one place and neither path needs `snow`.
+# --type=github` — both request the GitHub-issued JWT for the resolved audience
+# from the Actions OIDC endpoint — so minting, masking, and idempotency live in
+# exactly one place and neither path needs `snow`. An omitted audience is
+# snowflakecomputing.com unless SNOWFLAKE_CLI_AIR_GAPPED is true.
 #
 # Idempotent: if a prior step (e.g. the snow-install OIDC path) already exported
 # the token, it is reused rather than re-minted. Reuse writes SNOWFLAKE_AUDIENCE
@@ -18,22 +19,22 @@
 # Requires `permissions: id-token: write` on the job.
 #
 # Env:
-#   OIDC_TOKEN_NAME    Name of the env var to export the token as
-#                      (default SNOWFLAKE_TOKEN).
-#   SNOWFLAKE_AUDIENCE Audience claim to request (default snowflakecomputing.com).
+#   OIDC_TOKEN_NAME           Name of the env var to export the token as
+#                             (default SNOWFLAKE_TOKEN).
+#   OIDC_AUDIENCE             Explicit oidc-audience input. Empty means omitted.
+#   SNOWFLAKE_AUDIENCE        Audience already set on the job. Used when
+#                             OIDC_AUDIENCE is empty.
+#   SNOWFLAKE_CLI_AIR_GAPPED  When true and neither audience is set, refuse to
+#                             default to snowflakecomputing.com.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=oidc-audience.sh
+source "${SCRIPT_DIR}/oidc-audience.sh"
+resolve_oidc_audience
+
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
-AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
-# GITHUB_ENV is split on CR and LF. A carriage return would turn the rest of
-# the line into another assignment.
-case "$AUDIENCE" in
-    *$'\n'*|*$'\r'*)
-        echo "::error::oidc-audience must be a single line"
-        exit 1
-        ;;
-esac
 
 # Parse JSON and encode the audience with the stdlib. Prefer python3, falling
 # back to python (Windows runners expose the interpreter as `python`).

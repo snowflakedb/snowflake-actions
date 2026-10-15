@@ -221,8 +221,8 @@ Account validation is case-insensitive and compares the portion before the first
 | `target` | yes | DCM target name from `manifest.yml` |
 | `project-path` | yes | Path to the DCM project directory |
 | `snowflake-user` | yes | Snowflake username for authentication |
-| `cli-artifact` | no | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline |
-| `oidc-audience` | no | OIDC `aud` claim forwarded to CLI setup. Defaults to `snowflakecomputing.com`. AWS ISO callers must override this |
+| `cli-artifact` | no | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
+| `oidc-audience` | no | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 
 ### Outputs
 
@@ -257,8 +257,8 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 | `target` | yes | | DCM target name from `manifest.yml` |
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
-| `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline |
-| `oidc-audience` | no | `snowflakecomputing.com` | OIDC `aud` claim forwarded to CLI setup. AWS ISO callers must override this |
+| `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
+| `oidc-audience` | no | (omitted) | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 | `create-if-not-exists` | no | `true` | Run `snow dcm create --if-not-exists` before planning |
 | `comment-on-pr` | no | `false` | Post the plan summary as a comment on the associated PR. See [Step summaries and PR comments](#step-summaries-and-pr-comments) |
 | `plan-delta` | no | `false` | Run `snow dcm plan --delta` instead of a full plan |
@@ -301,8 +301,8 @@ The deploy output is written to the GitHub Step Summary and, when enabled, poste
 | `target` | yes | | DCM target name from `manifest.yml` |
 | `project-path` | yes | | Path to the DCM project directory |
 | `snowflake-user` | yes | | Snowflake username for authentication |
-| `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline |
-| `oidc-audience` | no | `snowflakecomputing.com` | OIDC `aud` claim forwarded to CLI setup. AWS ISO callers must override this |
+| `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
+| `oidc-audience` | no | (omitted) | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 | `allow-drops` | no | `false` | Set to `true` to skip destructive drop detection |
 | `comment-on-pr` | no | `false` | Post a deploy summary as a comment on the associated PR. See [Step summaries and PR comments](#step-summaries-and-pr-comments) |
 | `post-scripts-path` | no | `""` | Relative path (from project-path) to a directory of `.sql` files to run after deploy. Files are executed alphabetically with Jinja templating using manifest variables. |

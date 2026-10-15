@@ -8,26 +8,21 @@
 # workload-identity connection.
 #
 # Env:
-#   OIDC_TOKEN_NAME    Name of the env var to export the token as
-#                      (default SNOWFLAKE_TOKEN).
-#   SNOWFLAKE_AUDIENCE OIDC audience claim. Defaults to snowflakecomputing.com.
-#                      AWS ISO callers set this to the in-zone audience their
-#                      Snowflake OIDC security integration expects. Exported
-#                      before minting so the JWT aud and the env var match.
+#   OIDC_TOKEN_NAME           Name of the env var to export the token as
+#                             (default SNOWFLAKE_TOKEN).
+#   OIDC_AUDIENCE             Explicit oidc-audience input. Empty means omitted.
+#   SNOWFLAKE_AUDIENCE        Audience already set on the job. Used when
+#                             OIDC_AUDIENCE is empty. Exported before minting
+#                             so the JWT aud and the env var match.
+#   SNOWFLAKE_CLI_AIR_GAPPED  When true and neither audience is set, refuse to
+#                             default to snowflakecomputing.com.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-AUDIENCE="${SNOWFLAKE_AUDIENCE:-snowflakecomputing.com}"
-# GITHUB_ENV is split on CR and LF. A carriage return would turn the rest of
-# the line into another assignment.
-case "$AUDIENCE" in
-    *$'\n'*|*$'\r'*)
-        echo "::error::oidc-audience must be a single line"
-        exit 1
-        ;;
-esac
+# shellcheck source=oidc-audience.sh
+source "${SCRIPT_DIR}/oidc-audience.sh"
+resolve_oidc_audience
 export SNOWFLAKE_AUDIENCE="$AUDIENCE"
 
 # Mint (or reuse) and mask the GitHub OIDC token, exporting it under

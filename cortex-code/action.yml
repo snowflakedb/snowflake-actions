@@ -45,10 +45,12 @@ inputs:
   oidc-audience:
     description: >-
       Audience (aud) claim requested when this action mints the GitHub OIDC token.
-      Defaults to snowflakecomputing.com. AWS ISO and other in-zone accounts must
-      set this to the audience their Snowflake OIDC security integration expects.
+      An omitted value is empty. Empty uses SNOWFLAKE_AUDIENCE when that is
+      already set. Otherwise the action requests snowflakecomputing.com, unless
+      SNOWFLAKE_CLI_AIR_GAPPED is true, in which case oidc-audience or
+      SNOWFLAKE_AUDIENCE must be set.
     required: false
-    default: "snowflakecomputing.com"
+    default: ""
 
   prompt:
     description: "Optional inline Cortex Code prompt string to run after setup. Mutually exclusive with prompt-file. Leave both empty to install and configure only."
@@ -109,7 +111,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
-        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/../scripts/oidc-token.sh
 
     - name: Configure connection

@@ -277,14 +277,23 @@ jobs:
         run: |
           set -e
           export OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN"
-          export SNOWFLAKE_TOKEN="already-minted-token"
+          unset SNOWFLAKE_AUDIENCE OIDC_AUDIENCE SNOWFLAKE_CLI_AIR_GAPPED || true
+          # aud must match the audience this step resolves. With neither
+          # oidc-audience nor SNOWFLAKE_AUDIENCE set, that is the commercial default.
+          SNOWFLAKE_TOKEN="$(python3 -c '
+import base64, json
+payload = json.dumps({"aud": "snowflakecomputing.com", "sub": "t"}).encode()
+def b64(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
+')"
+          export SNOWFLAKE_TOKEN
           GITHUB_ENV=$(mktemp)
           export GITHUB_ENV
           OUTPUT=$(bash scripts/oidc-token.sh 2>&1)
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "reusing it"
-          # Reuse must not append anything to the environment file.
-          test ! -s "$GITHUB_ENV"
+          grep -qx 'SNOWFLAKE_AUDIENCE=snowflakecomputing.com' "$GITHUB_ENV"
           echo "PASS: reuse path"
 
       - name: "Test: error when the id-token endpoint is unavailable"

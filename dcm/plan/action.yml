@@ -66,17 +66,20 @@ inputs:
       Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
       Forwarded to the Snowflake CLI setup step and installed offline. uv and
       python3 must already be on PATH. Air-gapped runners can instead
-      preinstall snow on PATH and leave this empty.
+      preinstall snow on PATH and leave this empty. Either offline path exports
+      SNOWFLAKE_CLI_AIR_GAPPED=true for later steps unless that variable is
+      already set.
     required: false
     default: ""
   oidc-audience:
     description: >-
       Audience (aud) claim requested for the GitHub OIDC token. Forwarded to
-      the Snowflake CLI setup step. Defaults to snowflakecomputing.com. AWS ISO
-      and other in-zone accounts must set this to the audience their Snowflake
-      OIDC security integration expects.
+      the Snowflake CLI setup step. An omitted value is empty. Empty uses
+      SNOWFLAKE_AUDIENCE when that is already set. Otherwise the action requests
+      snowflakecomputing.com, unless SNOWFLAKE_CLI_AIR_GAPPED is true, in which
+      case oidc-audience or SNOWFLAKE_AUDIENCE must be set.
     required: false
-    default: "snowflakecomputing.com"
+    default: ""
   create-if-not-exists:
     description: "Run snow dcm create --if-not-exists before planning"
     required: false

@@ -21,9 +21,11 @@ inputs:
   cli-version:
     description: >-
       Snowflake CLI version to install (e.g. 3.20.0). An omitted value is empty.
-      Empty reuses a snow already on PATH and does not download. If snow is not
-      on PATH, empty installs the latest release from PyPI. The string latest
-      always installs from PyPI.
+      Empty reuses a snow already on PATH and does not download. That reuse
+      exports SNOWFLAKE_CLI_AIR_GAPPED=true for later steps, unless the variable
+      is already set or an earlier step installed the CLI from the network.
+      If snow is not on PATH, empty installs the latest release from PyPI.
+      The string latest always installs from PyPI.
     required: false
 
   default-config-file-path:
@@ -39,9 +41,10 @@ inputs:
     description: >-
       Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
       Installed with uv --offline (no PyPI). uv and python3 must already be on PATH.
-      Mutually exclusive with cli-version and custom-github-ref. Air-gapped runners
-      can instead preinstall snow on PATH and leave cli-version, custom-github-ref,
-      and cli-artifact empty to skip the download entirely.
+      Mutually exclusive with cli-version and custom-github-ref. This path exports
+      SNOWFLAKE_CLI_AIR_GAPPED=true for later steps unless that variable is already
+      set. Air-gapped runners can instead preinstall snow on PATH and leave
+      cli-version, custom-github-ref, and cli-artifact empty to skip the download.
     required: false
     default: ""
 
@@ -103,12 +106,13 @@ inputs:
 
   oidc-audience:
     description: >-
-      Audience (aud) claim requested for the GitHub OIDC token. Defaults to
-      snowflakecomputing.com, which commercial accounts expect. AWS ISO and other
-      in-zone accounts must set this to the audience their Snowflake OIDC security
-      integration expects. There is no automatic governance-zone default.
+      Audience (aud) claim requested for the GitHub OIDC token. An omitted value
+      is empty. Empty uses SNOWFLAKE_AUDIENCE when that is already set. Otherwise
+      the action requests snowflakecomputing.com, unless SNOWFLAKE_CLI_AIR_GAPPED
+      is true, in which case oidc-audience or SNOWFLAKE_AUDIENCE must be set.
+      There is no governance-zone default.
     required: false
-    default: "snowflakecomputing.com"
+    default: ""
 
 outputs:
   snowflake-cli-version:
@@ -173,7 +177,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
-        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/scripts/configure-snowflake-oidc.sh
 
     - name: Output Snowflake CLI version
@@ -223,7 +227,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
-        SNOWFLAKE_AUDIENCE: ${{ inputs.oidc-audience }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/scripts/oidc-token.sh
 
     - name: Configure Cortex Code connection
