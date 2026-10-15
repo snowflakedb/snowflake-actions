@@ -16,6 +16,17 @@ inputs:
     required: false
     default: "latest"
 
+  cortex-binary:
+    description: >-
+      Path to a local Cortex Code executable. When set, the action copies it onto PATH
+      and does not download the installer from ai.snowflake.com. The download is also
+      skipped when cortex is already on PATH. A cli-version other than latest fails
+      in both of those cases, because pinning runs cortex update and that reaches the
+      network. Leave cli-version at latest on an air-gapped runner. cortex-binary
+      cannot be combined with a pinned cli-version.
+    required: false
+    default: ""
+
   connection-name:
     description: "Connection name to write in connections.toml when configuring from OIDC env vars"
     required: false
@@ -30,6 +41,16 @@ inputs:
     description: "Env var name containing the OIDC token. Must match the token env var set by use-oidc (or by a parent action, if it set one)."
     required: false
     default: "SNOWFLAKE_TOKEN"
+
+  oidc-audience:
+    description: >-
+      Audience (aud) claim requested when this action mints the GitHub OIDC token.
+      An omitted value is empty. Empty uses SNOWFLAKE_AUDIENCE when that is
+      already set. Otherwise the action requests snowflakecomputing.com, unless
+      SNOWFLAKE_CLI_AIR_GAPPED is true, in which case oidc-audience or
+      SNOWFLAKE_AUDIENCE must be set.
+    required: false
+    default: ""
 
   prompt:
     description: "Optional inline Cortex Code prompt string to run after setup. Mutually exclusive with prompt-file. Leave both empty to install and configure only."
@@ -66,9 +87,11 @@ runs:
       run: bash $GITHUB_ACTION_PATH/../scripts/setup-environment.sh SF_CORTEX_CODE_GITHUB_ACTION
 
     - name: Install Cortex Code CLI
+      id: cortex-install
       shell: bash
       env:
         CORTEX_CHANNEL: ${{ inputs.cli-channel }}
+        CORTEX_BINARY: ${{ inputs.cortex-binary }}
       run: bash $GITHUB_ACTION_PATH/scripts/install-cortex.sh
 
     - name: Pin specific version
@@ -76,6 +99,8 @@ runs:
       shell: bash
       env:
         CORTEX_VERSION: ${{ inputs.cli-version }}
+        CORTEX_BINARY: ${{ inputs.cortex-binary }}
+        CORTEX_INSTALL_MODE: ${{ steps.cortex-install.outputs.install_mode }}
       run: bash $GITHUB_ACTION_PATH/scripts/pin-cortex-version.sh
 
     # Mint the OIDC token without the Snowflake CLI, so this action stands alone.
@@ -86,6 +111,7 @@ runs:
       shell: bash
       env:
         OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/../scripts/oidc-token.sh
 
     - name: Configure connection
