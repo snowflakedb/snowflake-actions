@@ -144,7 +144,7 @@ Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
 
 ## Version pinning
 
-`@v3` is the floating major tag. Each 3.x.x release moves it, so `snowflakedb/snowflake-actions@v3` runs the latest 3.x.x. The same tag covers this action, `cortex-code`, and the DCM actions.
+`@v3` tracks the latest 3.x.x release. Each release moves that tag, so `snowflakedb/snowflake-actions@v3` runs the new release with no workflow edit. The same tag covers this action, `cortex-code`, and the DCM actions.
 
 ```yaml
 - uses: snowflakedb/snowflake-actions@<sha>   # commit SHA (most secure)
@@ -154,14 +154,14 @@ Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
 
 ### Workflow dependency lockfiles
 
-[Workflow dependency lockfiles](https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles) are a GitHub Actions public preview. They stay off until you generate `.github/workflows/actions.lock` with [`gh actions-lock`](https://github.com/github/gh-actions-lock), or an admin enables the Require lockfile policy. This action does not change in either case. Inputs, OIDC, and `uses: snowflakedb/snowflake-actions@v3` stay the same.
+[Workflow dependency lockfiles](https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles) are a GitHub Actions public preview. A workflow that is not locked behaves as it does today: inputs and OIDC are unchanged, and `uses: snowflakedb/snowflake-actions@v3` still tracks new 3.x.x releases. You opt in by creating `.github/workflows/actions.lock` with [`gh actions-lock`](https://github.com/github/gh-actions-lock). If an admin requires a lockfile, a workflow without one fails until you create it.
 
-An onboarded workflow stops following the moving `@v3` tag. `gh actions-lock` rewrites `@v3` to the release it resolved, such as `@v3.3.2`, and records that commit. Later runs use the locked commit, including actions this composite calls, even after `@v3` moves. A newer 3.x.x release is picked up when the lockfile is updated. Dependabot does that in the same pull request as the version bump.
+Creating the lockfile stops `@v3` from tracking. The command rewrites `@v3` to the release it resolved, for example `@v3.3.2`, and records that commit. Later runs use the recorded commit, including actions this action calls, even after `@v3` moves. A newer 3.x.x release is used only when the lockfile is updated. If Dependabot manages GitHub Actions in your repository, it opens one pull request that bumps the version and updates the lockfile. Otherwise, change the `uses:` line and run `gh actions-lock` again.
 
-The lockfile pins the action commit. It does not pin the Snowflake CLI installed from PyPI. An empty `cli-version`, or `latest`, still installs the current CLI on each run.
+The lockfile pins this action. It does not pin the Snowflake CLI installed from PyPI. An empty `cli-version`, or `latest`, still installs the current CLI on each run.
 
 > [!NOTE]
-> An allowlist entry pinned to the tag `snowflakedb/snowflake-actions@v3` does not match a locked workflow. GitHub checks the locked commit SHA, and a tag cannot be matched back to that SHA. Allow `snowflakedb/snowflake-actions@*` or the full commit SHA. `@*` allows every ref in this repository, including a future major. An allowlist cannot express "only the 3.x line" for locked SHAs.
+> An allowlist entry for `snowflakedb/snowflake-actions@v3` does not match a locked workflow. GitHub checks the locked commit, not the tag. A tag entry cannot match that commit: the tag can move, and its history includes every earlier 3.x release. Allow `snowflakedb/snowflake-actions@*` or the full commit SHA. `@*` allows every ref in this repository, including a future major. An allowlist cannot say "only 3.x commits."
 
 ## Install from a branch, tag, or commit
 
