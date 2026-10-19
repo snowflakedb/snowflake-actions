@@ -144,11 +144,24 @@ Use this only when [OIDC](#oidc-recommended) isn't available. You can either:
 
 ## Version pinning
 
+`@v3` is the floating major tag. Each 3.x.x release moves it, so `snowflakedb/snowflake-actions@v3` runs the latest 3.x.x. The same tag covers this action, `cortex-code`, and the DCM actions.
+
 ```yaml
 - uses: snowflakedb/snowflake-actions@<sha>   # commit SHA (most secure)
 - uses: snowflakedb/snowflake-actions@v3.0.0  # exact patch
-- uses: snowflakedb/snowflake-actions@v3      # floating major
+- uses: snowflakedb/snowflake-actions@v3      # latest 3.x.x
 ```
+
+### Workflow dependency lockfiles
+
+[Workflow dependency lockfiles](https://docs.github.com/en/actions/concepts/security/workflow-dependency-lockfiles) are a GitHub Actions public preview. They stay off until you generate `.github/workflows/actions.lock` with [`gh actions-lock`](https://github.com/github/gh-actions-lock), or an admin enables the Require lockfile policy. This action does not change in either case. Inputs, OIDC, and `uses: snowflakedb/snowflake-actions@v3` stay the same.
+
+An onboarded workflow stops following the moving `@v3` tag. `gh actions-lock` rewrites `@v3` to the release it resolved, such as `@v3.3.2`, and records that commit. Later runs use the locked commit, including actions this composite calls, even after `@v3` moves. A newer 3.x.x release is picked up when the lockfile is updated. Dependabot does that in the same pull request as the version bump.
+
+The lockfile pins the action commit. It does not pin the Snowflake CLI installed from PyPI. An empty `cli-version`, or `latest`, still installs the current CLI on each run.
+
+> [!NOTE]
+> An allowlist entry pinned to the tag `snowflakedb/snowflake-actions@v3` does not match a locked workflow. GitHub checks the locked commit SHA, and a tag cannot be matched back to that SHA. Allow `snowflakedb/snowflake-actions@*` or the full commit SHA. `@*` allows every ref in this repository, including a future major. An allowlist cannot express "only the 3.x line" for locked SHAs.
 
 ## Install from a branch, tag, or commit
 
@@ -166,7 +179,7 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 
 ## Security
 
-- **Prefer OIDC** over long-lived secrets, and pin the action to a commit SHA.
+- **Prefer OIDC** over long-lived secrets, and pin the action to a commit SHA or a [workflow lockfile](#workflow-dependency-lockfiles).
 - **Least-privilege permissions:** OIDC needs `id-token: write`; most jobs need only `contents: read`.
 - **Set `persist-credentials: false`** on `actions/checkout`.
 - **Never commit credentials.** Inject them via GitHub Secrets at runtime.
