@@ -274,7 +274,7 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 
 ## dcm/deploy@v3
 
-Deploys the DCM project to a target. Optionally checks for destructive DROP operations before deploying.
+Deploys the DCM project to a target. Deploy copies the project directory to a temporary folder and runs from that copy. Optionally checks for destructive DROP operations before deploying.
 
 The `dcm/plan@v3` action **must** run before this action in the same job -- it produces the `out/plan_result.json` file used for drop detection.
 
@@ -299,7 +299,7 @@ The deploy output is written to the GitHub Step Summary and, when enabled, poste
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `target` | yes | | DCM target name from `manifest.yml` |
-| `project-path` | yes | | Path to the DCM project directory |
+| `project-path` | yes | | Path to the DCM project directory. Deploy copies it to a temporary folder and runs from that copy. |
 | `snowflake-user` | yes | | Snowflake username for authentication |
 | `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
 | `oidc-audience` | no | (omitted) | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
