@@ -64,7 +64,7 @@ inputs:
     description: "DCM target name from manifest.yml (e.g. DCM_STAGE, DCM_PROD_US)"
     required: true
   project-path:
-    description: "Path to the DCM project directory (containing manifest.yml)"
+    description: "Path to the DCM project directory (containing manifest.yml). Deploy copies this directory to a temporary folder and runs from that copy."
     required: true
   snowflake-user:
     description: "Snowflake username for OIDC authentication"
@@ -116,9 +116,28 @@ runs:
         oidc-audience: ${{ inputs.oidc-audience }}
         cli-artifact: ${{ inputs.cli-artifact }}
 
+    - name: Copy project directory
+      shell: bash
+      env:
+        PROJECT_PATH: ${{ inputs.project-path }}
+        POST_SCRIPTS_PATH: ${{ inputs.post-scripts-path }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        if [ ! -d "$PROJECT_PATH" ]; then
+          echo "::error::project-path is not a directory: $PROJECT_PATH"
+          exit 1
+        fi
+        SRC="$(cd "$PROJECT_PATH" && pwd -P)"
+        DEST="${RUNNER_TEMP}/dcm-project"
+        rm -rf "$DEST"
+        mkdir -p "$DEST"
+        cp -a "$SRC"/. "$DEST"/
+        dcm_check_copied_project "$DEST" "$POST_SCRIPTS_PATH"
+
     - name: Set connection env vars
       shell: bash
-      working-directory: ${{ inputs.project-path }}
+      working-directory: ${{ runner.temp }}/dcm-project
       env:
         TARGET: ${{ inputs.target }}
         SNOWFLAKE_USER: ${{ inputs.snowflake-user }}
@@ -132,7 +151,7 @@ runs:
       id: drop_check
       if: inputs.allow-drops != 'true'
       shell: bash
-      working-directory: ${{ inputs.project-path }}
+      working-directory: ${{ runner.temp }}/dcm-project
       run: |
         PLAN_FILE="out/plan_result.json"
         if [ ! -f "$PLAN_FILE" ]; then
@@ -173,7 +192,7 @@ runs:
     - name: Deploy
       id: deploy
       shell: bash
-      working-directory: ${{ inputs.project-path }}
+      working-directory: ${{ runner.temp }}/dcm-project
       env:
         TARGET: ${{ inputs.target }}
         PR_BRANCH: ${{ steps.pr_branch.outputs.branch }}
@@ -200,7 +219,7 @@ runs:
       id: post_scripts
       if: always() && steps.deploy.outputs.result == 'success' && inputs.post-scripts-path != ''
       shell: bash
-      working-directory: ${{ inputs.project-path }}
+      working-directory: ${{ runner.temp }}/dcm-project
       env:
         TARGET: ${{ inputs.target }}
         SCRIPTS_DIR: ${{ inputs.post-scripts-path }}

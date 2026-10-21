@@ -201,3 +201,57 @@ dcm_write_result() {
   local result="$3"
   gha_write_result "/tmp/dcm-results/dcm-${kind}-${target}.txt" "$result"
 }
+
+# True if $1 is $2 or a descendant of $2. Both must already be absolute.
+dcm_path_is_inside() {
+  local child="$1"
+  local parent="$2"
+  [ -n "$child" ] && [ -n "$parent" ] || return 1
+  case "$child" in
+    "$parent"|"$parent"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Confirm the copied project directory only refers to files inside that copy,
+# and that post-scripts-path stays under it.
+#
+# Usage: dcm_check_copied_project <dest> [post-scripts-relpath]
+dcm_check_copied_project() {
+  local dest="$1"
+  local relpath="${2:-}"
+  local dest_real link target resolved
+  local failed=0
+
+  dest_real="$(cd "$dest" && pwd -P)"
+
+  while IFS= read -r -d '' link; do
+    if ! target="$(realpath -e -- "$link" 2>/dev/null)"; then
+      echo "::error::project-path is not self-contained: $link"
+      failed=1
+      continue
+    fi
+    if ! dcm_path_is_inside "$target" "$dest_real"; then
+      echo "::error::project-path is not self-contained: $link"
+      failed=1
+    fi
+  done < <(find "$dest_real" -type l -print0)
+
+  if [ -n "$relpath" ]; then
+    case "$relpath" in
+      /*)
+        echo "::error::post-scripts-path must be a relative path under project-path: $relpath"
+        failed=1
+        ;;
+      *)
+        resolved="$(realpath -m -- "$dest_real/$relpath")"
+        if ! dcm_path_is_inside "$resolved" "$dest_real"; then
+          echo "::error::post-scripts-path must be a relative path under project-path: $relpath"
+          failed=1
+        fi
+        ;;
+    esac
+  fi
+
+  [ "$failed" -eq 0 ]
+}
