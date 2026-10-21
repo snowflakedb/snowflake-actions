@@ -24,6 +24,7 @@ run_script() {
     HOME="$fake_home" \
     RUNNER_OS="$runner_os" \
     TMPDIR="$STAGE_ROOT" \
+    GITHUB_WORKSPACE="$workdir" \
     CONFIG_FILE_PATH="$config_path" \
       bash "$SCRIPT"
   ) || rc=$?
@@ -83,6 +84,19 @@ run_script "$WS" "$HOME_DIR" "./config.toml" "Windows" || fail "windows: script 
 grep -q 'CONFIG-WINDOWS' "$HOME_DIR/.snowflake/config.toml" \
   || fail "windows: installed config does not match the source"
 echo "PASS: RUNNER_OS=Windows still installs the config"
+
+# A path outside the workspace is rejected.
+WS="$TEST_ROOT/outside/checkout"
+HOME_DIR="$TEST_ROOT/outside/home"
+OUTSIDE="$TEST_ROOT/outside/other.toml"
+mkdir -p "$WS"
+printf 'must-stay-put\n' > "$OUTSIDE"
+rc=0
+run_script "$WS" "$HOME_DIR" "$OUTSIDE" || rc=$?
+[ "$rc" -ne 0 ] || fail "outside: expected a non-zero exit"
+[ ! -e "$HOME_DIR/.snowflake/config.toml" ] \
+  || fail "outside: a file outside the workspace was copied"
+echo "PASS: a config file outside the workspace is rejected"
 
 leftovers="$(find "$STAGE_ROOT" -mindepth 1 -print | wc -l | tr -d ' ')"
 [ "$leftovers" = "0" ] || fail "temporary directory was not cleaned up ($leftovers leftover paths)"
