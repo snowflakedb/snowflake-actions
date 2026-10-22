@@ -52,6 +52,8 @@ runs:
     # pinned per-install below via `uv tool install --python 3.11` instead, which
     # scopes the pin to the isolated tool environment without touching the job.
     - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
+      with:
+        version: "0.13.5"
 
     - name: Either cli-version or custom-github-ref allowed
       if: ${{ inputs.cli-version != '' && inputs.custom-github-ref != '' }}
