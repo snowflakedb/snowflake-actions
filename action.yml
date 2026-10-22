@@ -106,6 +106,8 @@ runs:
     # Keep the pinned setup-uv SHA in sync with snowflake-cli/action.yml.
     - if: ${{ inputs.snowflake-cli == 'true' }}
       uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 #v7.1.6
+      with:
+        version: "0.13.5"
 
     - name: Install Snowflake CLI
       if: ${{ inputs.snowflake-cli == 'true' }}
