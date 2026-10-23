@@ -152,8 +152,8 @@ unset SNOWFLAKE_CLI_AIR_GAPPED SF_CICD_CLI_SOURCE || true
 CLI_VERSION=latest UV_LOG="$UV_LOG" GITHUB_ENV="$INSTALL_ENV" \
     bash "$REPO_ROOT/scripts/install-snowflake-cli.sh" \
     || fail "install: latest should call uv"
-grep -q 'tool install --python 3.11 snowflake-cli' "$UV_LOG" \
-    || fail "install: latest did not call uv tool install"
+grep -q 'tool install --no-build --python 3.11 snowflake-cli' "$UV_LOG" \
+    || fail "install: latest did not call uv tool install --no-build"
 grep -qx 'SF_CICD_CLI_SOURCE=network' "$INSTALL_ENV" \
     || fail "install: latest did not record a network install"
 grep -q 'SNOWFLAKE_CLI_AIR_GAPPED=' "$INSTALL_ENV" \
