@@ -19,6 +19,9 @@
 # Requires `uv` on PATH for any install that actually runs. The action runs
 # astral-sh/setup-uv first unless the plan step skips it.
 #
+# PyPI installs pass --no-build (wheels only). A git ref is a source
+# checkout, so that path does not.
+#
 # Env:
 #   CLI_VERSION         Snowflake CLI version (e.g. "3.20.0"), "latest", or empty.
 #   CUSTOM_GITHUB_REF   Branch/tag/commit to install from source instead of PyPI.
@@ -91,10 +94,10 @@ elif [ -n "$CUSTOM_GITHUB_REF" ]; then
     uv tool install --python 3.11 "git+https://github.com/snowflakedb/snowflake-cli.git@${CUSTOM_GITHUB_REF}"
 elif [ -n "$CLI_VERSION" ] && [ "$CLI_VERSION" != "latest" ]; then
     echo "Installing Snowflake CLI ${CLI_VERSION}"
-    uv tool install --python 3.11 "snowflake-cli==${CLI_VERSION}"
+    uv tool install --no-build --python 3.11 "snowflake-cli==${CLI_VERSION}"
 else
     echo "Installing latest Snowflake CLI release"
-    uv tool install --python 3.11 snowflake-cli
+    uv tool install --no-build --python 3.11 snowflake-cli
 fi
 
 if [ -z "$CLI_ARTIFACT" ]; then
