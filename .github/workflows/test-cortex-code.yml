@@ -314,6 +314,18 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
           echo "$OUTPUT" | grep -q "id-token: write"
           echo "PASS: missing-endpoint path"
 
+  unit-test-cortex-release:
+    name: Unit test cortex release install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run cortex release tests
+        shell: bash
+        run: bash cortex-code/scripts/test-cortex-release.sh
+
   unit-test-validate-cortex-inputs:
     name: Unit test validate-cortex-inputs.sh
     runs-on: ubuntu-latest

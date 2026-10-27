@@ -50,7 +50,7 @@ jobs:
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
 | `cli-artifact` | none | Local wheel, sdist, or directory of wheels. Installed offline, and exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps unless that variable is already set. |
-| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. A pinned `cortex-version` fails in both cases. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the release-archive download. The download is also skipped when `cortex` is already on `PATH`. A pinned `cortex-version` fails in both cases. |
 
 - `cli-version`, `custom-github-ref`, and `cli-artifact` are mutually exclusive.
 - `use-oidc` needs CLI `3.11+` and `id-token: write`.
@@ -61,11 +61,11 @@ jobs:
 
 GitHub-hosted runners are unchanged: the action downloads `uv` and installs the CLI from PyPI.
 
-On a runner with no route to `pypi.org`, `github.com`, or `ai.snowflake.com`:
+On a runner with no route to `pypi.org`, `github.com`, or `sfc-repo.snowflakecomputing.com`:
 
 - Preinstall `snow` on `PATH` and leave `cli-version`, `custom-github-ref`, and `cli-artifact` empty. The action reuses that binary and does not download `uv`. It exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps.
 - Or set `cli-artifact` to a wheel, sdist, or a directory of wheels. `uv` and `python3` must already be on the runner. The install is `uv tool install --offline` and does not contact PyPI. Put dependency wheels next to the CLI wheel (or in that directory) so `--find-links` can resolve them. This path exports `SNOWFLAKE_CLI_AIR_GAPPED=true` as well.
-- For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave `cortex-version` at `latest`. The action does not curl `ai.snowflake.com`. A `cortex-version` other than `latest` fails in both of those cases, because pinning runs `cortex update` and that reaches the network. `cortex-binary` cannot be combined with a pinned `cortex-version`. Setting root `cli-version` to `latest` still installs the Snowflake CLI from PyPI.
+- For Cortex Code, set `cortex-binary` to a local `cortex` executable, or preinstall `cortex` on `PATH` and leave `cortex-version` at `latest`. The action does not download a release archive. A `cortex-version` other than `latest` fails in both of those cases, because pinning reaches the network. `cortex-binary` cannot be combined with a pinned `cortex-version`. Setting root `cli-version` to `latest` still installs the Snowflake CLI from PyPI.
 
 Either offline path exports `SNOWFLAKE_CLI_AIR_GAPPED=true` into the job environment, so later `snow` commands run air-gapped without a separate flag: no auto-upgrade, no public template download, and no commercial OIDC audience default. An explicit `SNOWFLAKE_CLI_AIR_GAPPED` is left unchanged, so set it to `false` to reuse a preinstalled binary without that mode. A CLI this job already installed from PyPI or GitHub is not flipped when a later step only reuses it.
 
@@ -199,8 +199,8 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 ### How it works
 
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
-2. Installs CoCo CLI from the specified channel, unless `cortex-binary` is set or `cortex` is already on `PATH`.
-3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. Fails before `cortex update` when `cortex-binary` is set or `cortex` was already on `PATH`.
+2. Installs the channel's Cortex Code release archive and checks it against the release manifest, unless `cortex-binary` is set or `cortex` is already on `PATH`.
+3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. A published archive is installed from that archive. Otherwise the installed CLI updates to that version. Fails before either step when `cortex-binary` is set or `cortex` was already on `PATH`.
 4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
 
 ### Inputs
@@ -208,8 +208,8 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-channel` | `stable` | Install channel: `stable` or `beta`. |
-| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` runs `cortex update` after a fresh download, which reaches the network, and fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
-| `cortex-binary` | none | Local Cortex Code executable. Skips the download from `ai.snowflake.com`. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
+| `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` installs that version's release archive when one is published, and otherwise runs `cortex update`. It fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
+| `cortex-binary` | none | Local Cortex Code executable. Skips the release-archive download. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
 | `oidc-audience` | (omitted) | `aud` claim when this action mints the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true. |

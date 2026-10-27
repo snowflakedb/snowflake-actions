@@ -62,10 +62,10 @@ inputs:
   cortex-binary:
     description: >-
       Path to a local Cortex Code executable. When set, the action copies it onto PATH
-      and does not download the installer from ai.snowflake.com. The download is also
+      and does not download a Cortex Code release archive. The download is also
       skipped when cortex is already on PATH. A cortex-version other than latest fails
-      in both of those cases, because pinning runs cortex update and that reaches the
-      network. cortex-binary cannot be combined with a pinned cortex-version.
+      in both of those cases, because pinning reaches the network. cortex-binary
+      cannot be combined with a pinned cortex-version.
     required: false
     default: ""
 

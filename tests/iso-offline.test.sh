@@ -413,7 +413,7 @@ CORTEX_BINARY="$TEST_ROOT/cortex-bin" \
 [ -x "$HOME/.local/bin/cortex" ] || fail "cortex: local binary was not installed"
 grep -qx 'install_mode=local' "$TEST_ROOT/cortex-local.out" \
     || fail "cortex: local binary did not record install_mode=local"
-echo "PASS: cortex-binary does not contact ai.snowflake.com"
+echo "PASS: cortex-binary does not download a release archive"
 
 # Preinstalled cortex is reused.
 rm -f "$HOME/.local/bin/cortex"
@@ -425,7 +425,7 @@ GITHUB_OUTPUT="$TEST_ROOT/cortex-preinstalled.out" \
     || fail "cortex: preinstalled binary should succeed"
 grep -qx 'install_mode=preinstalled' "$TEST_ROOT/cortex-preinstalled.out" \
     || fail "cortex: preinstalled binary did not record install_mode=preinstalled"
-echo "PASS: cortex already on PATH skips the installer download"
+echo "PASS: cortex already on PATH skips the release-archive download"
 
 # Pinning must fail before cortex update for a preinstalled binary and for a
 # local binary. A fresh download is the only mode that may call update.
@@ -462,6 +462,13 @@ cat > "$HOME/.local/bin/cortex" << 'EOF'
 printf '%s\n' "$*" > "$CORTEX_LOG"
 EOF
 chmod +x "$HOME/.local/bin/cortex"
+# No release archive for this version, so the pin falls back to cortex update.
+cat > "$TEST_ROOT/bin/curl" << 'EOF'
+#!/bin/sh
+printf '404'
+exit 0
+EOF
+chmod +x "$TEST_ROOT/bin/curl"
 CORTEX_LOG="$TEST_ROOT/cortex-update.log"
 : > "$CORTEX_LOG"
 CORTEX_INSTALL_MODE=downloaded CORTEX_VERSION=1.5.2 CORTEX_LOG="$CORTEX_LOG" \

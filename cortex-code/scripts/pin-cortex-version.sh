@@ -9,10 +9,10 @@
 #   CORTEX_VERSION        Version to pin (e.g. "1.5.2").
 #   CORTEX_BINARY         Set when the caller passed a local executable.
 #   CORTEX_INSTALL_MODE   local, preinstalled, or downloaded. From install-cortex.sh.
-#                         Pinning is `cortex update`, which reaches the network,
-#                         so only a fresh download may be pinned. A local binary
-#                         or a cortex already on PATH fails here, before update.
-#                         That matches the CLI rejecting cli-artifact plus a version.
+#                         Only a fresh download may be pinned. A published archive
+#                         for that version is installed from the archive. Otherwise
+#                         the installed CLI runs `cortex update`. A local binary or
+#                         a cortex already on PATH fails here, before either step.
 
 set -euo pipefail
 
@@ -30,4 +30,15 @@ if [ "$CORTEX_INSTALL_MODE" != "downloaded" ]; then
 fi
 
 export PATH="${HOME}/.local/bin:$PATH"
-cortex update "$CORTEX_VERSION"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+set +e
+bash "${SCRIPT_DIR}/cortex-release.sh" --version "${CORTEX_VERSION}"
+status=$?
+set -e
+
+if [[ "$status" -eq 44 ]]; then
+    cortex update "$CORTEX_VERSION"
+elif [[ "$status" -ne 0 ]]; then
+    exit "$status"
+fi
