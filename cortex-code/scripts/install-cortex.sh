@@ -3,13 +3,13 @@
 # Install the Cortex Code CLI.
 #
 # Offline / air-gapped runners: set CORTEX_BINARY to a local executable, or
-# preinstall `cortex` on PATH. Either path skips the download from
-# ai.snowflake.com. A pinned version fails in both cases, because pinning
-# runs `cortex update` and that reaches the network. Leave the version at
-# latest when offline. CORTEX_BINARY cannot be combined with a pin.
+# preinstall `cortex` on PATH. Either path skips the release-archive download.
+# A pinned version fails in both cases, because pinning reaches the network.
+# Leave the version at latest when offline. CORTEX_BINARY cannot be combined
+# with a pin.
 #
 # Writes install_mode=local|preinstalled|downloaded to $GITHUB_OUTPUT so the
-# pin step can fail before `cortex update` without guessing from PATH (after
+# pin step can fail before a download without guessing from PATH (after
 # this script, cortex is on PATH in every successful mode).
 #
 # Env:
@@ -21,6 +21,7 @@ set -euo pipefail
 
 CORTEX_CHANNEL="${CORTEX_CHANNEL:-stable}"
 CORTEX_BINARY="${CORTEX_BINARY:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 export PATH="${HOME}/.local/bin:${PATH}"
 mkdir -p "${HOME}/.local/bin"
@@ -33,16 +34,14 @@ if [ -n "$CORTEX_BINARY" ]; then
     cp "$CORTEX_BINARY" "${HOME}/.local/bin/cortex"
     chmod 0755 "${HOME}/.local/bin/cortex"
     install_mode=local
-    echo "Installed Cortex Code from local binary; did not contact ai.snowflake.com."
+    echo "Installed Cortex Code from local binary; did not download a release archive."
 elif command -v cortex >/dev/null 2>&1; then
     install_mode=preinstalled
-    echo "cortex already on PATH ($(command -v cortex)); skipping download from ai.snowflake.com."
+    echo "cortex already on PATH ($(command -v cortex)); skipping the release-archive download."
 else
     install_mode=downloaded
     echo "Installing Cortex Code CLI (channel: ${CORTEX_CHANNEL})..."
-    curl -LsS https://ai.snowflake.com/static/cc-scripts/install.sh -o /tmp/cortex-install.sh
-    SKIP_PODMAN=1 NON_INTERACTIVE=1 CORTEX_CHANNEL="$CORTEX_CHANNEL" sh /tmp/cortex-install.sh
-    rm -f /tmp/cortex-install.sh
+    bash "${SCRIPT_DIR}/cortex-release.sh" --channel "$CORTEX_CHANNEL"
 fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
