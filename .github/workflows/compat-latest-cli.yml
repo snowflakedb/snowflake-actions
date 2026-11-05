@@ -19,7 +19,9 @@ permissions:
   contents: read
 
 jobs:
+  # Fork pull requests do not run these jobs.
   install-latest:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install latest CLI on ${{ matrix.os }} / py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -62,6 +64,7 @@ jobs:
           snow connection list > /dev/null
 
   install-cli-leaf:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install Snowflake CLI via the snowflake-cli leaf action
     runs-on: ubuntu-latest
     steps:

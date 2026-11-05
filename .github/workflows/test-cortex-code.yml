@@ -20,7 +20,9 @@ permissions:
   contents: read
 
 jobs:
+  # Fork pull requests do not run these jobs.
   install-cortex-code:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install CoCo CLI (stable)
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +50,7 @@ jobs:
           test -x "${HOME}/.local/bin/cortex"
 
   install-beta-channel:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install CoCo CLI (beta)
     runs-on: ubuntu-latest
     steps:
@@ -71,6 +74,7 @@ jobs:
           cortex --version
 
   install-cortex-standalone:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install CoCo CLI standalone (no snow)
     runs-on: ubuntu-latest
     steps:
@@ -94,6 +98,7 @@ jobs:
           echo "PASS: cortex installed standalone, snow absent"
 
   install-both-from-root:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install snow + CoCo from root action
     runs-on: ubuntu-latest
     steps:
@@ -117,6 +122,7 @@ jobs:
           echo "PASS: snow + cortex both installed from root"
 
   install-cortex-only-from-root:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install only CoCo from root action
     runs-on: ubuntu-latest
     steps:
@@ -143,6 +149,7 @@ jobs:
           echo "PASS: only cortex installed from root"
 
   unit-test-setup-connection:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test setup-connection.py
     runs-on: ubuntu-latest
     steps:
@@ -265,6 +272,7 @@ jobs:
           echo "PASS: validation rejected bad name"
 
   unit-test-oidc-token:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test oidc-token.sh
     runs-on: ubuntu-latest
     steps:
@@ -315,6 +323,7 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
           echo "PASS: missing-endpoint path"
 
   unit-test-cortex-release:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test cortex release install
     runs-on: ubuntu-latest
     steps:
@@ -327,6 +336,7 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
         run: bash cortex-code/scripts/test-cortex-release.sh
 
   unit-test-validate-cortex-inputs:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test validate-cortex-inputs.sh
     runs-on: ubuntu-latest
     steps:
@@ -390,6 +400,7 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
           echo "PASS: error names cortex-version"
 
   unit-test-run-prompt:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test run-prompt.sh
     runs-on: ubuntu-latest
     steps:
