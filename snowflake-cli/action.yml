@@ -47,15 +47,15 @@ inputs:
     default: ""
 
   use-oidc:
-    description: "Enable OIDC authentication. Bash steps export a GitHub OIDC token and replace it every 4 minutes. The token is not written to a file."
+    description: "Enable OIDC authentication. Bash steps mint a GitHub OIDC token in the background every 4 minutes. The next command uses that token. The token is not written to a file."
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Environment variable that receives the OIDC token. Bash steps replace it
-      every 4 minutes. When that variable is already set, the action leaves it
-      unchanged. Default SNOWFLAKE_TOKEN.
+      Environment variable that receives the OIDC token. Bash steps mint a new
+      one in the background every 4 minutes. When that variable is already set,
+      the action leaves it unchanged. Default SNOWFLAKE_TOKEN.
     required: false
     default: "SNOWFLAKE_TOKEN"
 

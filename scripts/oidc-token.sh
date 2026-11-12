@@ -17,8 +17,9 @@
 #
 # GitHub expires the token after 5 minutes, and Snowflake CLI 3.33 keeps a
 # token that is already set instead of minting. This script proves the endpoint
-# once and does not store that value. Later bash steps export a new token and
-# replace that variable every 4 minutes. The token is not written to a file.
+# once and does not store that value. Later bash steps mint a new token in the
+# background every 4 minutes and export the newest one before the next command.
+# The token is not written to a file.
 #
 # Requires `permissions: id-token: write` on the job.
 #
@@ -97,9 +98,9 @@ print("match" if match else "mismatch")
     exit 0
 fi
 
-# Prove the job can mint, then drop the value. Later bash steps export a fresh
-# token and replace it every 4 minutes. Do not append the token to GITHUB_ENV
-# and do not write it to a file.
+# Prove the job can mint, then drop the value. Later bash steps mint a new
+# token in the background every 4 minutes. Do not append the token to
+# GITHUB_ENV and do not write it to a file.
 # shellcheck source=oidc-token-env.sh
 source "${SCRIPT_DIR}/oidc-token-env.sh"
 export OIDC_TOKEN_NAME="$TOKEN_NAME_UPPER"
@@ -113,4 +114,4 @@ unset token
     printf 'SNOWFLAKE_AUDIENCE=%s\n' "$AUDIENCE"
 } >> "$GITHUB_ENV"
 oidc_install_keepalive
-echo "Checked GitHub OIDC (audience: ${AUDIENCE}). Bash steps replace the token every 4 minutes."
+echo "Checked GitHub OIDC (audience: ${AUDIENCE}). Bash steps mint a new token in the background every 4 minutes."

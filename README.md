@@ -44,7 +44,7 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. That reuse exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps, unless the variable is already set or an earlier step installed the CLI from the network. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
-| `use-oidc` | `false` | Authenticate with GitHub OIDC. Bash steps export a token and replace it every 4 minutes. The token is not written to a file. |
+| `use-oidc` | `false` | Authenticate with GitHub OIDC. Bash steps mint a new token in the background every 4 minutes. The next command uses that token. The token is not written to a file. |
 | `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var that receives the OIDC token. When that variable is already set, the action leaves it unchanged. |
 | `oidc-audience` | (omitted) | `aud` claim for the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set. Otherwise the action requests `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true, in which case `oidc-audience` or `SNOWFLAKE_AUDIENCE` must be set. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
@@ -79,7 +79,7 @@ Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
 
-GitHub's token expires after 5 minutes. Snowflake CLI 3.33 reuses a token that is already set, so bash steps export a new token and replace that variable every 4 minutes, before the next command. The token is not written to a file.
+GitHub's token expires after 5 minutes. Snowflake CLI 3.33 reuses a token that is already set. Each bash step mints a new token in the background every 4 minutes, and the next command in that step uses the newest one. The token is not written to a file.
 
 **1. Create a service user in Snowflake** whose workload identity trusts your repo's GitHub OIDC tokens:
 

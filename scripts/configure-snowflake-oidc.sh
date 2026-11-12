@@ -27,7 +27,7 @@ resolve_oidc_audience
 export SNOWFLAKE_AUDIENCE="$AUDIENCE"
 
 # Prove the GitHub OIDC endpoint is reachable. The minted token is masked and
-# dropped. Later bash steps export a token and replace it every 4 minutes.
+# dropped. Later bash steps mint a new token in the background every 4 minutes.
 # A token the job already put in OIDC_TOKEN_NAME is left unchanged.
 bash "${SCRIPT_DIR}/oidc-token.sh"
 

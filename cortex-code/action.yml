@@ -33,7 +33,7 @@ inputs:
     default: "default"
 
   use-oidc:
-    description: "Check GitHub OIDC and write a workload-identity connection. Bash steps replace the token every 4 minutes. The token is not written to a file. Requires 'id-token: write'. Leave false if a parent step already configured OIDC."
+    description: "Check GitHub OIDC and write a workload-identity connection. Bash steps mint a new token in the background every 4 minutes. The token is not written to a file. Requires 'id-token: write'. Leave false if a parent step already configured OIDC."
     required: false
     default: "false"
 

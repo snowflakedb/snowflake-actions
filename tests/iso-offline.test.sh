@@ -440,8 +440,8 @@ grep -q '_FILE_PATH=' "$GITHUB_ENV" \
     && fail "oidc-token: reuse published a token file this action does not update"
 echo "PASS: oidc-token does not refresh a token it did not mint"
 
-# A mint checks that OIDC works, then drops the token. Later bash steps export
-# a new token and replace it every 4 minutes. The token is not written to
+# A mint checks that OIDC works, then drops the token. Later bash steps mint a
+# new token in the background every 4 minutes. The token is not written to
 # GITHUB_ENV or to a file.
 REFRESH_DIR="$TEST_ROOT/oidc-refresh"
 mkdir -p "$REFRESH_DIR"
@@ -506,7 +506,70 @@ rotated="$(
 if [ -e "$REFRESH_DIR/token" ] || [ -e "${TMPDIR:-/tmp}/snowflake-oidc-refresh/token" ]; then
     fail "oidc-token: refresh wrote the token to disk"
 fi
-echo "PASS: oidc-token refreshes the variable and does not write a file"
+
+# The background child mints on the interval while this shell is idle.
+# The next command exports that token. Nothing is written to a file.
+before_bg="$(cat "$COUNTER")"
+prefetched="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_REFRESH_INTERVAL=1 \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c '
+        start=$SNOWFLAKE_TOKEN
+        i=0
+        while [ "$i" -lt 8 ]; do
+            i=$((i + 1))
+            sleep 1
+            [ "$SNOWFLAKE_TOKEN" != "$start" ] && break
+        done
+        printf %s "$SNOWFLAKE_TOKEN"
+    ' | tail -n 1
+)"
+sync_n=$((before_bg + 1))
+prefetched_n="${prefetched#token-}"
+case "$prefetched_n" in
+    ''|*[!0-9]*) fail "oidc-token: background refresh did not export a token (got ${prefetched})" ;;
+esac
+[ "$prefetched_n" -gt "$sync_n" ] \
+    || fail "oidc-token: background refresh did not pre-mint (got ${prefetched}, first mint was token-${sync_n})"
+grep -q "$prefetched" "$GITHUB_ENV" \
+    && fail "oidc-token: background token was written to GITHUB_ENV"
+# The child stays in the step's process group. Once that shell exits it stops
+# minting. A detached refresher would keep writing tokens after this.
+after_bg="$(cat "$COUNTER")"
+sleep 2
+[ "$(cat "$COUNTER")" = "$after_bg" ] \
+    || fail "oidc-token: background refresh kept minting after the step exited"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "$REFRESH_DIR/refresh.pid" ] \
+    || [ -e "${TMPDIR:-/tmp}/snowflake-oidc-refresh/token" ]; then
+    fail "oidc-token: background refresh wrote the token to disk"
+fi
+
+# A token the job supplied is not replaced by the background loop.
+supplied_before="$(cat "$COUNTER")"
+supplied_out="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_SUPPLIED=true \
+    OIDC_TOKEN_REFRESH_INTERVAL=1 \
+    SNOWFLAKE_TOKEN="supplied-token" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'sleep 2; printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$supplied_out" = "supplied-token" ] \
+    || fail "oidc-token: background refresh replaced a supplied token (got ${supplied_out})"
+[ "$(cat "$COUNTER")" = "$supplied_before" ] \
+    || fail "oidc-token: background refresh minted for a supplied token"
+echo "PASS: oidc-token refreshes the variable in the background and does not write a file"
 unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH GITHUB_ENV COUNTER \
     ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN BASH_ENV \
     OIDC_TOKEN_ISSUED_AT || true

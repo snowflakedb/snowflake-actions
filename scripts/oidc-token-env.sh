@@ -2,9 +2,9 @@
 # Shared helpers for the GitHub OIDC token variable.
 #
 # Sourced by oidc-token.sh and oidc-token-keepalive.sh. The token is exported
-# into the shell. It is not written to a file. A later process cannot see a
-# variable this shell has not exported, so the keepalive refreshes it in this
-# shell before a command once the token is older than 4 minutes.
+# into the shell. It is not written to a file. A child of this bash step mints
+# a new token every 4 minutes into an anonymous pipe. The shell copies the
+# newest value into the environment before the next command.
 
 oidc_reject_control_chars() {
     local value="$1" what="$2"
@@ -82,32 +82,116 @@ oidc_export_token() {
     echo "::add-mask::${value}"
 }
 
-oidc_refresh_env_if_due() {
-    local name interval now issued audience token
-    [ "${OIDC_TOKEN_SUPPLIED:-}" = "true" ] && return 0
-    name="$(oidc_token_env_name)" || return 1
-    interval="$(oidc_interval)"
-    now="$(date +%s)"
-    issued="${OIDC_TOKEN_ISSUED_AT:-0}"
-    case "$issued" in
-        ''|*[!0-9]*) issued=0 ;;
+# Child of this shell. $1 is the parent pid. Bash does not update PPID inside
+# a process substitution, so the parent passes $$. Mints immediately, then
+# again every interval, and writes one token per line to the anonymous pipe.
+# No setsid: the child stays in this step's process group and dies with it.
+oidc_refresh_loop() {
+    trap - DEBUG EXIT
+    local parent="$1" interval audience token slept
+    case "${parent:-}" in
+        ''|*[!0-9]*) exit 0 ;;
     esac
-    if [ -n "${!name:-}" ] && [ "$issued" -gt 0 ] && [ $((now - issued)) -lt "$interval" ]; then
+    interval="$(oidc_interval)"
+    while kill -0 "$parent" 2>/dev/null; do
+        audience="${SNOWFLAKE_AUDIENCE:-${OIDC_AUDIENCE:-}}"
+        token=""
+        if [ -n "$audience" ]; then
+            token="$(oidc_mint_github_token "$audience")" || token=""
+        fi
+        case "$token" in
+            ''|*$'\n'*|*$'\r'*) token="" ;;
+        esac
+        if [ -n "$token" ]; then
+            printf '%s\n' "$token" || exit 0
+        fi
+        slept=0
+        while [ "$slept" -lt "$interval" ]; do
+            kill -0 "$parent" 2>/dev/null || exit 0
+            sleep 1 || exit 0
+            slept=$((slept + 1))
+        done
+    done
+    exit 0
+}
+
+# The read end is not a file. Close it on exec so a later command does not
+# hold the pipe open. Windows python has no fcntl; the runner still kills the
+# step's process group.
+oidc_cloexec() {
+    local fd="$1" python
+    python="$(command -v python3 || command -v python || true)"
+    [ -n "$python" ] || return 0
+    "$python" -c 'import fcntl,sys
+fd = int(sys.argv[1])
+fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC)' "$fd" 2>/dev/null || true
+}
+
+# Block until the child has minted once, and export that value.
+oidc_export_first_token() {
+    local line name fd
+    fd="${OIDC_REFRESH_FD:-}"
+    [ -n "$fd" ] || return 1
+    name="$(oidc_token_env_name)" || return 1
+    if IFS= read -r -t 30 -u "$fd" line; then
+        [ -n "$line" ] || return 1
+        oidc_export_token "$name" "$line"
         return 0
     fi
-    audience="${SNOWFLAKE_AUDIENCE:-${OIDC_AUDIENCE:-}}"
-    if [ -z "$audience" ]; then
-        echo "::error::SNOWFLAKE_AUDIENCE is not set, so the OIDC token cannot be refreshed." >&2
-        return 1
+    return 1
+}
+
+# Start the mint loop in this shell. A caller-supplied token is left alone.
+# `{fd}` allocation is bash 4.1. macOS runners still ship bash 3.2.
+oidc_start_background_refresh() {
+    local fd
+    [ "${OIDC_TOKEN_SUPPLIED:-}" = "true" ] && return 0
+    [ "${OIDC_TOKEN_REFRESH:-}" = "false" ] && return 0
+    [ -n "${OIDC_REFRESH_FD:-}" ] && return 0
+    fd=""
+    for fd in 9 8 7; do
+        if ! { true >&"$fd"; } 2>/dev/null; then
+            break
+        fi
+        fd=""
+    done
+    if [ -z "$fd" ]; then
+        echo "::warning::Could not start background refresh of the Snowflake OIDC token."
+        return 0
     fi
-    token="$(oidc_mint_github_token "$audience")" || return 1
-    oidc_export_token "$name" "$token"
+    OIDC_REFRESH_FD=$fd
+    case "$fd" in
+        9) exec 9< <(oidc_refresh_loop "$$") ;;
+        8) exec 8< <(oidc_refresh_loop "$$") ;;
+        7) exec 7< <(oidc_refresh_loop "$$") ;;
+    esac
+    oidc_cloexec "$fd"
+    if ! oidc_export_first_token; then
+        echo "::warning::Could not refresh the Snowflake OIDC token; later snow commands may fail authentication."
+    fi
+}
+
+# Copy the newest background token into this shell. Does not mint.
+oidc_take_prefetched_token() {
+    local fd line latest name
+    fd="${OIDC_REFRESH_FD:-}"
+    [ -n "$fd" ] || return 0
+    latest=
+    # `read -t 0` only reports readiness. A closed pipe stays ready, so the
+    # next read has to consume the line or the EOF or this loop never ends.
+    while read -t 0 <&"$fd"; do
+        IFS= read -r line <&"$fd" || break
+        [ -n "$line" ] && latest=$line
+    done || true
+    [ -n "$latest" ] || return 0
+    name="$(oidc_token_env_name)" || return 0
+    oidc_export_token "$name" "$latest" || true
 }
 
 oidc_refresh_before_command() {
     [ "${OIDC_REFRESH_BUSY:-}" = 1 ] && return 0
     OIDC_REFRESH_BUSY=1
-    oidc_refresh_env_if_due || true
+    oidc_take_prefetched_token || true
     OIDC_REFRESH_BUSY=0
     return 0
 }
