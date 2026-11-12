@@ -44,8 +44,8 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. That reuse exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps, unless the variable is already set or an earlier step installed the CLI from the network. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
-| `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
+| `use-oidc` | `false` | Authenticate with a GitHub OIDC token. The action refreshes that token every 4 minutes. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. When the name ends with `_TOKEN`, the action also exports the matching `*_FILE_PATH` variable pointing at the current token file. |
 | `oidc-audience` | (omitted) | `aud` claim for the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set. Otherwise the action requests `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true, in which case `oidc-audience` or `SNOWFLAKE_AUDIENCE` must be set. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
@@ -78,6 +78,8 @@ Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and
 ### OIDC (recommended)
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
+
+GitHub's token expires after 5 minutes. The action refreshes the token file every 4 minutes and exports `SNOWFLAKE_TOKEN_FILE_PATH` (or `<name>_FILE_PATH` when `oidc-token-name` ends with `_TOKEN`) so a later `snow` command reads a current token. Bash steps also pick up the refreshed token in the environment before the step's commands run.
 
 **1. Create a service user in Snowflake** whose workload identity trusts your repo's GitHub OIDC tokens:
 

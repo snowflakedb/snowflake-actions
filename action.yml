@@ -91,7 +91,7 @@ inputs:
 
   # --- Shared authentication options -------------------------------------
   use-oidc:
-    description: "Enable OIDC authentication"
+    description: "Enable OIDC authentication. Refreshes the GitHub OIDC token every 4 minutes."
     required: false
     default: "false"
 
@@ -101,6 +101,8 @@ inputs:
       temporary connections
       (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
       change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
+      Also exports <NAME>_FILE_PATH when the name ends with _TOKEN, pointing at the
+      token file the CLI reads on each command.
     required: false
     default: "SNOWFLAKE_TOKEN"
 

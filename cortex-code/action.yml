@@ -33,7 +33,7 @@ inputs:
     default: "default"
 
   use-oidc:
-    description: "Mint a GitHub OIDC token and write a workload-identity connection. Requires 'id-token: write'. Leave false if a parent step already set the OIDC token env var."
+    description: "Mint a GitHub OIDC token and write a workload-identity connection. The token is refreshed every 4 minutes. Requires 'id-token: write'. Leave false if a parent step already set the OIDC token env var."
     required: false
     default: "false"
 
