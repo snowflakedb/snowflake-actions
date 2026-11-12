@@ -1,0 +1,133 @@
+# Temporary check that PR 64 keeps a GitHub OIDC token usable by CLI 3.33
+# after the token's 5-minute lifetime. Prints claim ages only, never the JWT.
+name: Verify OIDC token past expiry
+
+on:
+  push:
+    branches: [verify-oidc-3172]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Snowflake CLI 3.33.0
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cli333"
+          "$RUNNER_TEMP/cli333/bin/pip" install --disable-pip-version-check 'snowflake-cli==3.33.0'
+          echo "$RUNNER_TEMP/cli333/bin" >> "$GITHUB_PATH"
+
+      - name: Set up OIDC the way the action does
+        shell: bash
+        env:
+          OIDC_TOKEN_NAME: SNOWFLAKE_TOKEN
+        run: |
+          set -euo pipefail
+          bash scripts/oidc-token.sh
+          if grep -q '^SNOWFLAKE_TOKEN=' "$GITHUB_ENV"; then
+            echo "FAIL: setup wrote SNOWFLAKE_TOKEN into GITHUB_ENV"
+            exit 1
+          fi
+          grep -q '^BASH_ENV=' "$GITHUB_ENV"
+          echo "PASS: setup published BASH_ENV and did not publish the token"
+
+      - name: Same bash step, command after the token would have expired
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import base64, json, os, time
+          tok = os.environ.get("SNOWFLAKE_TOKEN", "")
+          if not tok:
+              raise SystemExit("FAIL: no SNOWFLAKE_TOKEN at step start")
+          payload = tok.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          now = time.time()
+          path = os.environ["RUNNER_TEMP"] + "/oidc-start.json"
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump({"iat": claims["iat"], "exp": claims["exp"], "now": now}, fh)
+          print(
+              f"step-start lifetime={claims['exp'] - claims['iat']:.0f}s "
+              f"iat_age={now - claims['iat']:.0f}s exp_in={claims['exp'] - now:.0f}s"
+          )
+          if claims["exp"] <= now:
+              raise SystemExit("FAIL: token already expired at step start")
+          PY
+          echo "sleeping 360s so the step-start token is past its 5-minute life"
+          sleep 360
+          python3 - << 'PY'
+          import base64, json, os, time
+          from unittest.mock import patch
+          from snowflake.cli._app.snow_connector import _maybe_update_oidc_token
+
+          def claims_of(tok):
+              payload = tok.split(".")[1]
+              payload += "=" * (-len(payload) % 4)
+              return json.loads(base64.urlsafe_b64decode(payload))
+
+          tok = os.environ.get("SNOWFLAKE_TOKEN", "")
+          if not tok:
+              raise SystemExit("FAIL: no SNOWFLAKE_TOKEN before the later command")
+          # Post-scripts capture snow output with a command substitution.
+          seen = os.popen('python3 -c \'import os; print(os.environ.get("SNOWFLAKE_TOKEN",""))\'').read().strip()
+          if seen != tok:
+              raise SystemExit("FAIL: command substitution did not see the shell token")
+          now = time.time()
+          claims = claims_of(tok)
+          with open(os.environ["RUNNER_TEMP"] + "/oidc-start.json", encoding="utf-8") as fh:
+              start = json.load(fh)
+          print(
+              f"after-wait iat_age={now - claims['iat']:.0f}s "
+              f"exp_in={claims['exp'] - now:.0f}s "
+              f"iat_delta={claims['iat'] - start['iat']:.0f}s"
+          )
+          if claims["iat"] <= start["iat"]:
+              raise SystemExit("FAIL: later command still has the step-start token")
+          if claims["exp"] <= now + 30:
+              raise SystemExit("FAIL: later command's token is expired or about to expire")
+          with patch("snowflake.cli._app.snow_connector.OidcManager") as manager:
+              out = _maybe_update_oidc_token({"token": tok})
+          if out.get("token") != tok:
+              raise SystemExit("FAIL: CLI 3.33 replaced the action token")
+          if manager.called:
+              raise SystemExit("FAIL: CLI 3.33 minted its own token")
+          print("PASS: after 6 minutes CLI 3.33 keeps a token that is still valid")
+          PY
+
+      - name: New step, same shape as dcm post-scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import base64, json, os, time
+          from unittest.mock import patch
+          from snowflake.cli._app.snow_connector import _maybe_update_oidc_token
+
+          tok = os.environ.get("SNOWFLAKE_TOKEN", "")
+          if not tok:
+              raise SystemExit("FAIL: post-scripts step has no SNOWFLAKE_TOKEN")
+          payload = tok.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          now = time.time()
+          print(
+              f"new-step iat_age={now - claims['iat']:.0f}s "
+              f"exp_in={claims['exp'] - now:.0f}s "
+              f"lifetime={claims['exp'] - claims['iat']:.0f}s"
+          )
+          if now - claims["iat"] > 60:
+              raise SystemExit("FAIL: new step inherited a token minted more than a minute ago")
+          if claims["exp"] <= now + 120:
+              raise SystemExit("FAIL: new step token expires too soon")
+          with patch("snowflake.cli._app.snow_connector.OidcManager") as manager:
+              out = _maybe_update_oidc_token({"token": tok})
+          if out.get("token") != tok or manager.called:
+              raise SystemExit("FAIL: CLI 3.33 did not keep the new step's token")
+          print("PASS: a later bash step gets a newly minted token and CLI 3.33 keeps it")
+          PY
