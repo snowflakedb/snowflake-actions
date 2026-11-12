@@ -70,6 +70,14 @@ def main() -> None:
     # The parent action sets SF_CICD_AUTH_TYPE. A bash step may also export the
     # token. A caller-supplied token is a signal too. The token is not written
     # into the connection.
+    #
+    # Snowflake CLI merges SNOWFLAKE_TOKEN into every connection and, on 3.33,
+    # mints only when token and token_file_path are both empty. The Python
+    # connector does not read SNOWFLAKE_TOKEN into a named connection loaded
+    # from this file; OIDC there requires the token on the connection. This
+    # repo has no evidence that `cortex -c <name>` reads SNOWFLAKE_TOKEN. Set
+    # oidc-token-name to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN when the caller
+    # reads the connection-specific variable.
     token = env_optional(token_var)
     oidc_configured = env_optional("SF_CICD_AUTH_TYPE") == "oidc"
     if not token and not oidc_configured:

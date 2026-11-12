@@ -26,7 +26,9 @@
 # Env:
 #   OIDC_TOKEN_NAME           Env var that later bash steps export the token
 #                             into (default SNOWFLAKE_TOKEN). When it is
-#                             already set, it is left unchanged.
+#                             already set in a step, and this keepalive did
+#                             not mint it, it is left unchanged. Other shells
+#                             do not export a rotating token.
 #   OIDC_AUDIENCE             Explicit oidc-audience input. Empty means omitted.
 #   SNOWFLAKE_AUDIENCE        Audience already set on the job. Used when
 #                             OIDC_AUDIENCE is empty.
@@ -38,6 +40,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=oidc-audience.sh
 source "${SCRIPT_DIR}/oidc-audience.sh"
+# shellcheck source=oidc-token-env.sh
+source "${SCRIPT_DIR}/oidc-token-env.sh"
 resolve_oidc_audience
 
 TOKEN_NAME_UPPER=$(echo "${OIDC_TOKEN_NAME:-SNOWFLAKE_TOKEN}" | tr '[:lower:]' '[:upper:]')
@@ -57,7 +61,8 @@ fi
 # Reuse keeps the existing token, so that token has to have been minted for
 # this same audience.
 if [ -n "${!TOKEN_NAME_UPPER:-}" ]; then
-    echo "::add-mask::${!TOKEN_NAME_UPPER}"
+    oidc_xtrace_off
+    oidc_mask_value "${!TOKEN_NAME_UPPER}"
     aud_status="$("$PYTHON" -c '
 import base64, json, sys
 token, expected = sys.argv[1], sys.argv[2]
@@ -79,6 +84,7 @@ else:
     match = aud == expected
 print("match" if match else "mismatch")
 ' "${!TOKEN_NAME_UPPER}" "$AUDIENCE")"
+    oidc_xtrace_on
     case "$aud_status" in
         match) ;;
         mismatch)
@@ -101,14 +107,17 @@ fi
 # Prove the job can mint, then drop the value. Later bash steps mint a new
 # token in the background every 4 minutes. Do not append the token to
 # GITHUB_ENV and do not write it to a file.
-# shellcheck source=oidc-token-env.sh
-source "${SCRIPT_DIR}/oidc-token-env.sh"
 export OIDC_TOKEN_NAME="$TOKEN_NAME_UPPER"
 export SNOWFLAKE_AUDIENCE="$AUDIENCE"
 token="$(oidc_mint_github_token "$AUDIENCE")" || exit 1
-oidc_reject_control_chars "$token" "OIDC token" || exit 1
-echo "::add-mask::${token}"
+oidc_xtrace_off
+oidc_reject_control_chars "$token" "OIDC token" || {
+    oidc_xtrace_on
+    exit 1
+}
+oidc_mask_value "$token"
 unset token
+oidc_xtrace_on
 {
     echo "SF_CICD_AUTH_TYPE=oidc"
     printf 'SNOWFLAKE_AUDIENCE=%s\n' "$AUDIENCE"
