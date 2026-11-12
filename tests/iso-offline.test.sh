@@ -208,10 +208,7 @@ grep -q 'uv is not on PATH' "$TEST_ROOT/missing-uv.out" \
 echo "PASS: cli-artifact without uv fails loudly"
 
 # --- oidc audience is forwarded into the token request and GITHUB_ENV ---
-# Existing mint cases must not leave a refresher racing CURL_LOG.
 unset SNOWFLAKE_TOKEN BASH_ENV || true
-export OIDC_TOKEN_REFRESH=false
-export OIDC_REFRESH_STATE_DIR="$TEST_ROOT/oidc-state"
 cat > "$TEST_ROOT/bin/curl" << 'EOF'
 #!/bin/sh
 printf '%s\n' "$*" > "$CURL_LOG"
@@ -237,19 +234,17 @@ grep -q 'audience=snowflake.iso.example%2Faud' "$CURL_LOG" \
     || fail "oidc-token: audience was not URL-encoded into the request"
 grep -qx 'SNOWFLAKE_AUDIENCE=snowflake.iso.example/aud' "$GITHUB_ENV" \
     || fail "oidc-token: GITHUB_ENV audience was not the override"
-grep -qx "SNOWFLAKE_TOKEN_FILE_PATH=$TEST_ROOT/oidc-state/token" "$GITHUB_ENV" \
-    || fail "oidc-token: GITHUB_ENV did not publish the token file"
+grep -qx 'SF_CICD_AUTH_TYPE=oidc' "$GITHUB_ENV" \
+    || fail "oidc-token: GITHUB_ENV did not record oidc auth"
+grep -q 'eyJhbGciOiJub25lIn0' "$GITHUB_ENV" \
+    && fail "oidc-token: minted token was written to GITHUB_ENV"
+grep -q '_FILE_PATH=' "$GITHUB_ENV" \
+    && fail "oidc-token: GITHUB_ENV published a token file"
 grep -q '^BASH_ENV=' "$GITHUB_ENV" \
-    && fail "oidc-token: refresh disabled but BASH_ENV was set"
-[ ! -e "$TEST_ROOT/oidc-state/refresh.pid" ] \
-    || fail "oidc-token: refresh disabled but a refresher started"
-python3 -c 'import os, pathlib, sys
-path = sys.argv[1]
-mode = os.stat(path).st_mode & 0o777
-data = pathlib.Path(path).read_bytes()
-raise SystemExit(0 if mode == 0o600 and data and b"\n" not in data else 1)' \
-    "$TEST_ROOT/oidc-state/token" \
-    || fail "oidc-token: token file is not a private single line"
+    && fail "oidc-token: BASH_ENV was set"
+if [ -e "$TEST_ROOT/oidc-state/token" ] || [ -e "$TEST_ROOT/oidc-state/refresh.pid" ]; then
+    fail "oidc-token: token was written to disk"
+fi
 grep -q 'snowflakecomputing.com' "$CURL_LOG" \
     && fail "oidc-token: commercial audience leaked into the request"
 echo "PASS: oidc-token requests the configured audience"
@@ -443,8 +438,9 @@ grep -q '_FILE_PATH=' "$GITHUB_ENV" \
     && fail "oidc-token: reuse published a token file this action does not update"
 echo "PASS: oidc-token does not refresh a token it did not mint"
 
-# Background refresh replaces the file the CLI reads. Sleep first, so the
-# first curl is the mint and a later curl is the rotation.
+# A mint checks that OIDC works, then drops the token. Nothing is written to
+# disk and the value is not copied into GITHUB_ENV, so a later snow command
+# mints its own instead of reusing an expired one.
 REFRESH_DIR="$TEST_ROOT/oidc-refresh"
 mkdir -p "$REFRESH_DIR"
 COUNTER="$REFRESH_DIR/count"
@@ -461,92 +457,24 @@ chmod +x "$TEST_ROOT/bin/curl"
 unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH BASH_ENV || true
 GITHUB_ENV="$TEST_ROOT/refresh-github.env"
 : > "$GITHUB_ENV"
-OIDC_TOKEN_REFRESH=true \
-OIDC_REFRESH_STATE_DIR="$REFRESH_DIR" \
-OIDC_TOKEN_REFRESH_INTERVAL=1 \
 ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
 ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
 SNOWFLAKE_AUDIENCE="iso.example" \
 OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
 GITHUB_ENV="$GITHUB_ENV" \
     bash "$REPO_ROOT/scripts/oidc-token.sh" \
-    || fail "oidc-token: refresh mint should succeed"
-grep -qx "SNOWFLAKE_TOKEN_FILE_PATH=$REFRESH_DIR/token" "$GITHUB_ENV" \
-    || fail "oidc-token: refresh did not publish the token file"
-grep -qx "BASH_ENV=$REFRESH_DIR/oidc-token-keepalive.sh" "$GITHUB_ENV" \
-    || fail "oidc-token: refresh did not point BASH_ENV at the keepalive"
-grep -qx 'SNOWFLAKE_TOKEN=token-1' "$GITHUB_ENV" \
-    || fail "oidc-token: first mint was not token-1"
-[ "$(cat "$REFRESH_DIR/token")" = "token-1" ] \
-    || fail "oidc-token: token file was not the first mint"
-python3 -c 'import os, pathlib, sys
-path = sys.argv[1]
-mode = os.stat(path).st_mode & 0o777
-data = pathlib.Path(path).read_bytes()
-raise SystemExit(0 if mode == 0o600 and data == b"token-1" else 1)' \
-    "$REFRESH_DIR/token" \
-    || fail "oidc-token: refreshed token file is not mode 600 without a newline"
-pid="$(tr -d '[:space:]' < "$REFRESH_DIR/refresh.pid")"
-kill -0 "$pid" || fail "oidc-token: refresher is not running"
-refreshed=""
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    refreshed="$(cat "$REFRESH_DIR/token")"
-    if [ "$refreshed" != "token-1" ]; then
-        break
-    fi
-    sleep 0.25
-done
-[ "$refreshed" != "token-1" ] || fail "oidc-token: token file was not refreshed"
-case "$refreshed" in
-    token-[0-9]*) ;;
-    *) fail "oidc-token: refreshed file is not a token" ;;
-esac
-kill -0 "$pid" || fail "oidc-token: refresher died during rotation"
-if [ -f "$REFRESH_DIR/refresh.log" ]; then
-    grep -q 'token-[0-9]' "$REFRESH_DIR/refresh.log" \
-        && fail "oidc-token: refresh log contains the token"
+    || fail "oidc-token: mint check should succeed"
+[ "$(cat "$COUNTER")" = "1" ] || fail "oidc-token: mint check did not request a token"
+grep -qx 'SF_CICD_AUTH_TYPE=oidc' "$GITHUB_ENV" \
+    || fail "oidc-token: mint check did not record oidc auth"
+grep -q 'token-1' "$GITHUB_ENV" \
+    && fail "oidc-token: mint check wrote the token into GITHUB_ENV"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "$REFRESH_DIR/refresh.pid" ]; then
+    fail "oidc-token: mint check wrote the token to disk"
 fi
-echo "PASS: oidc-token refreshes the token file in the background"
-
-# A later bash step refreshes a stale file before its commands, and publishes
-# the new token for the following step.
-kill "$pid" 2>/dev/null || true
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-        break
-    fi
-    sleep 0.1
-done
-before="$(cat "$REFRESH_DIR/token")"
-python3 -c 'import os, time, sys; os.utime(sys.argv[1], (time.time() - 600, time.time() - 600))' \
-    "$REFRESH_DIR/token"
-KEEPALIVE_ENV="$TEST_ROOT/keepalive.env"
-: > "$KEEPALIVE_ENV"
-# Later job steps already have GitHub's OIDC endpoint variables. This shell
-# only had them on the mint command, so publish them the way the runner does.
-export ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token"
-export ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token"
-GITHUB_ENV="$KEEPALIVE_ENV"
-export GITHUB_ENV
-# shellcheck disable=SC1091
-source "$REFRESH_DIR/oidc-token-keepalive.sh"
-after="$(cat "$REFRESH_DIR/token")"
-[ "$after" != "$before" ] || fail "oidc-keepalive: stale token file was not refreshed"
-grep -qx "SNOWFLAKE_TOKEN=$after" "$KEEPALIVE_ENV" \
-    || fail "oidc-keepalive: did not publish the refreshed token"
-[ "${SNOWFLAKE_TOKEN:-}" = "$after" ] \
-    || fail "oidc-keepalive: did not export the refreshed token into the step"
-echo "PASS: bash steps refresh a stale OIDC token before they run"
-if [ -f "$REFRESH_DIR/refresh.pid" ]; then
-    pid="$(tr -d '[:space:]' < "$REFRESH_DIR/refresh.pid" || true)"
-    if [ -n "$pid" ]; then
-        kill "$pid" 2>/dev/null || true
-    fi
-fi
+echo "PASS: oidc-token does not save the minted token"
 unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH GITHUB_ENV COUNTER \
     ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
-export OIDC_TOKEN_REFRESH=false
-export OIDC_REFRESH_STATE_DIR="$TEST_ROOT/oidc-state"
 
 # --- cortex: local binary does not curl ---
 cat > "$TEST_ROOT/bin/curl" << 'EOF'

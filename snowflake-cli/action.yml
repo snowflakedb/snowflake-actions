@@ -47,18 +47,16 @@ inputs:
     default: ""
 
   use-oidc:
-    description: "Enable OIDC authentication. Refreshes the GitHub OIDC token every 4 minutes."
+    description: "Enable OIDC authentication. Each later snow command mints its own GitHub OIDC token. The action does not save the token."
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Name of the token environment variable for OIDC authentication. By default it is set for
-      temporary connections
-      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
-      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
-      Also exports <NAME>_FILE_PATH when the name ends with _TOKEN, pointing at the
-      token file the CLI reads on each command.
+      Environment variable treated as a caller-supplied OIDC token. When that
+      variable is already set, the action leaves it unchanged. The action does
+      not write a token into it. Leave it at SNOWFLAKE_TOKEN unless a previous
+      step exported the token under another name.
     required: false
     default: "SNOWFLAKE_TOKEN"
 

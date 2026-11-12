@@ -3,8 +3,10 @@
 
 Detection logic:
 1. If connection already exists in connections.toml -> skip (no overwrite).
-2. If OIDC token is set in env (parent action configured OIDC) -> write connection using env vars.
-3. If neither token nor existing connection -> skip gracefully (install-only mode).
+2. If the parent action configured OIDC (SF_CICD_AUTH_TYPE=oidc, or a token env
+   var a caller already set) -> write a workload-identity connection. The token
+   is not written. Each command mints its own.
+3. If neither signal nor an existing connection -> skip gracefully (install-only mode).
 
 Requires Python 3.11+ (tomllib in stdlib).
 """
@@ -65,9 +67,12 @@ def main() -> None:
         print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
         return
 
-    # Auto-detect: look for OIDC token from parent action
+    # The parent action sets SF_CICD_AUTH_TYPE and does not leave the token in
+    # the environment. A caller-supplied token is also a signal. Neither value
+    # is written into the connection.
     token = env_optional(token_var)
-    if not token:
+    oidc_configured = env_optional("SF_CICD_AUTH_TYPE") == "oidc"
+    if not token and not oidc_configured:
         # No token -- if the file already defines connections, leave them for
         # the user; otherwise there is nothing to do (install-only mode).
         if existing:
@@ -88,7 +93,7 @@ def main() -> None:
     user = env_optional("SNOWFLAKE_USER")
     if not account or not user:
         error(
-            f"{token_var} is set but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
+            "OIDC is configured but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
             "Set these as env vars in your workflow."
         )
 

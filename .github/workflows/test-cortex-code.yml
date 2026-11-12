@@ -170,6 +170,27 @@ jobs:
           test ! -f "${HOME}/.snowflake/connections.toml"
           echo "PASS: skip path"
 
+      - name: "Test: write connection when OIDC is configured and no token is saved"
+        shell: bash
+        run: |
+          set -e
+          HOME=$(mktemp -d)
+          export HOME
+          unset SNOWFLAKE_TOKEN
+          export SF_CICD_AUTH_TYPE="oidc"
+          export SNOWFLAKE_ACCOUNT="test-account"
+          export SNOWFLAKE_USER="test-user"
+          export CONNECTION_NAME="default"
+          python3 cortex-code/scripts/setup-connection.py
+          test -f "${HOME}/.snowflake/connections.toml"
+          grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
+          grep -q 'WORKLOAD_IDENTITY' "${HOME}/.snowflake/connections.toml"
+          if grep -q 'token' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: token must not be written to connections.toml"
+            exit 1
+          fi
+          echo "PASS: oidc auth type without a saved token"
+
       - name: "Test: write connection when token is set"
         shell: bash
         run: |

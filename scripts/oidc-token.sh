@@ -11,34 +11,28 @@
 # exactly one place and neither path needs `snow`. An omitted audience is
 # snowflakecomputing.com unless SNOWFLAKE_CLI_AIR_GAPPED is true.
 #
-# Idempotent: if a prior step (e.g. the snow-install OIDC path) already exported
-# the token, it is reused rather than re-minted. Reuse writes SNOWFLAKE_AUDIENCE
-# before returning, and only when that token's aud matches the audience requested
-# on this step. A reused token is not rotated here; rotation starts only when
-# this script mints.
+# Idempotent: if a prior step already exported a token, it is left in place
+# rather than re-minted. Reuse writes SNOWFLAKE_AUDIENCE before returning, and
+# only when that token's aud matches the audience requested on this step.
 #
-# A minted token is also written to a file. GitHub expires the OIDC token after
-# 5 minutes, and the CLI keeps a token or token_file_path that is already set,
-# so a background loop refreshes that file every 4 minutes. See
-# oidc-token-refresh.sh.
+# A token this script mints is not stored. GitHub expires it after 5 minutes,
+# and Snowflake CLI 3.33 keeps a token or token_file_path that is already set
+# instead of minting. The setup step mints once to prove the OIDC endpoint is
+# reachable, masks that value, and drops it. Each later snow command mints its
+# own token in that process.
 #
 # Requires `permissions: id-token: write` on the job.
 #
 # Env:
-#   OIDC_TOKEN_NAME           Name of the env var to export the token as
-#                             (default SNOWFLAKE_TOKEN).
+#   OIDC_TOKEN_NAME           Env var to treat as a caller-supplied token
+#                             (default SNOWFLAKE_TOKEN). When it is already
+#                             set, it is left unchanged. This script does not
+#                             write it.
 #   OIDC_AUDIENCE             Explicit oidc-audience input. Empty means omitted.
 #   SNOWFLAKE_AUDIENCE        Audience already set on the job. Used when
 #                             OIDC_AUDIENCE is empty.
 #   SNOWFLAKE_CLI_AIR_GAPPED  When true and neither audience is set, refuse to
 #                             default to snowflakecomputing.com.
-#   OIDC_TOKEN_REFRESH        Set to false to skip the background refresh.
-#                             Tests use this. Not an action input.
-#   OIDC_TOKEN_REFRESH_INTERVAL
-#                             Seconds between refreshes. Default 240. Values
-#                             outside 1..240 are clamped to 240.
-#   OIDC_REFRESH_STATE_DIR    Directory for the token file and the refresher.
-#                             Default $RUNNER_TEMP/snowflake-oidc-refresh.
 
 set -euo pipefail
 
@@ -56,6 +50,30 @@ if [ -z "$PYTHON" ]; then
     echo "::error::No python interpreter (python3 or python) found to parse the OIDC token."
     exit 1
 fi
+
+oidc_mint_github_token() {
+    local audience="$1" encoded response token
+    if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+        echo "::error::use-oidc is set but the GitHub OIDC endpoint is unavailable. Add 'permissions: id-token: write' to the job." >&2
+        return 1
+    fi
+    encoded="$("$PYTHON" -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$audience")"
+    response=$(curl -sS --fail \
+        -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+        "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded}") || {
+        echo "::error::Could not reach the GitHub OIDC endpoint to mint a token. Confirm the job has 'permissions: id-token: write' and that GitHub Actions OIDC is reachable." >&2
+        return 1
+    }
+    token=$(printf '%s' "$response" | "$PYTHON" -c 'import sys, json; print(json.load(sys.stdin)["value"])') || {
+        echo "::error::Failed to obtain an OIDC token from GitHub." >&2
+        return 1
+    }
+    if [ -z "$token" ]; then
+        echo "::error::Failed to obtain an OIDC token from GitHub." >&2
+        return 1
+    fi
+    printf '%s' "$token"
+}
 
 # Reuse a token that's already in the env rather than minting again. This covers
 # the intended case (the snow-install and Cortex Code paths both run with
@@ -102,9 +120,20 @@ print("match" if match else "mismatch")
     exit 0
 fi
 
-# shellcheck source=oidc-token-refresh.sh
-source "${SCRIPT_DIR}/oidc-token-refresh.sh"
-# Record the auth type on this shared minting path (telemetry), and publish
-# the token file the CLI reads on each later command. See oidc-token-refresh.sh.
+# Prove the job can mint, then drop the token. Do not append it to GITHUB_ENV
+# and do not write it to a file. CLI 3.33 will not mint its own token when
+# either of those is set.
 token="$(oidc_mint_github_token "$AUDIENCE")" || exit 1
-oidc_install_refresh "$token"
+case "$token" in
+    *$'\n'*|*$'\r'*)
+        echo "::error::OIDC token must be a single line." >&2
+        exit 1
+        ;;
+esac
+echo "::add-mask::${token}"
+unset token
+{
+    echo "SF_CICD_AUTH_TYPE=oidc"
+    printf 'SNOWFLAKE_AUDIENCE=%s\n' "$AUDIENCE"
+} >> "$GITHUB_ENV"
+echo "Checked GitHub OIDC (audience: ${AUDIENCE}). Each snow command mints its own token."
