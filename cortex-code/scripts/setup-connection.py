@@ -74,10 +74,11 @@ def main() -> None:
     # Snowflake CLI merges SNOWFLAKE_TOKEN into every connection and, on 3.33,
     # mints only when token and token_file_path are both empty. The Python
     # connector does not read SNOWFLAKE_TOKEN into a named connection loaded
-    # from this file; OIDC there requires the token on the connection. This
-    # repo has no evidence that `cortex -c <name>` reads SNOWFLAKE_TOKEN. Set
-    # oidc-token-name to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN when the caller
-    # reads the connection-specific variable.
+    # from this file; OIDC there requires the token on the connection. Cortex
+    # Code 1.1.104 does: for authenticator WORKLOAD_IDENTITY it uses
+    # SNOWFLAKE_TOKEN when the connection has no token. Set oidc-token-name
+    # to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to supply only that named
+    # connection for snow.
     token = env_optional(token_var)
     oidc_configured = env_optional("SF_CICD_AUTH_TYPE") == "oidc"
     if not token and not oidc_configured:

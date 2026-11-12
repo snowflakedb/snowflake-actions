@@ -38,7 +38,7 @@ inputs:
     default: "false"
 
   oidc-token-name:
-    description: "Env var bash steps export the token into. Default SNOWFLAKE_TOKEN. Set SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN when the caller reads that variable. A value already set in the step is left unchanged. Must match the parent action."
+    description: "Env var bash steps export the token into. Default SNOWFLAKE_TOKEN, which Cortex reads for a workload-identity connection. Set SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to supply only that named connection for snow. A value already set in the step is left unchanged. Must match the parent action."
     required: false
     default: "SNOWFLAKE_TOKEN"
 

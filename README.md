@@ -203,7 +203,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
 2. Installs the channel's Cortex Code release archive and checks it against the release manifest, unless `cortex-binary` is set or `cortex` is already on `PATH`.
 3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. A published archive is installed from that archive. Otherwise the installed CLI updates to that version. Fails before either step when `cortex-binary` is set or `cortex` was already on `PATH`.
-4. Sees that the parent action configured OIDC and writes a workload-identity connection with no token in the file. Bash steps export the token into the variable named by `oidc-token-name`. `snow` merges `SNOWFLAKE_TOKEN` into every connection. A caller that reads `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` needs that name instead. If a connection with that name already exists, it skips (no overwrite).
+4. Sees that the parent action configured OIDC and writes a workload-identity connection with no token in the file. Bash steps export the token into the variable named by `oidc-token-name` (default `SNOWFLAKE_TOKEN`). `snow` merges that variable into every connection. Cortex reads `SNOWFLAKE_TOKEN` when the connection's authenticator is workload identity and the file has no token. Set `oidc-token-name` to `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` to supply only that named connection for `snow`. If a connection with that name already exists, it skips (no overwrite).
 
 ### Inputs
 
@@ -213,7 +213,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` installs that version's release archive when one is published, and otherwise runs `cortex update`. It fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
 | `cortex-binary` | none | Local Cortex Code executable. Skips the release-archive download. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var bash steps export the token into. Set `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` when the caller reads that variable instead of `SNOWFLAKE_TOKEN`. A value already set in the step is left unchanged. Match the parent action. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var bash steps export the token into. Cortex reads `SNOWFLAKE_TOKEN` for a workload-identity connection. Set `SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN` to supply only that named connection for `snow`. A value already set in the step is left unchanged. Match the parent action. |
 | `oidc-audience` | (omitted) | `aud` claim when this action mints the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true. |
 
 ### Outputs
