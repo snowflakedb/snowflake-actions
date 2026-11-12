@@ -33,12 +33,12 @@ inputs:
     default: "default"
 
   use-oidc:
-    description: "Check GitHub OIDC and write a workload-identity connection. The token is not saved. Requires 'id-token: write'. Leave false if a parent step already configured OIDC."
+    description: "Check GitHub OIDC and write a workload-identity connection. Bash steps replace the token every 4 minutes. The token is not written to a file. Requires 'id-token: write'. Leave false if a parent step already configured OIDC."
     required: false
     default: "false"
 
   oidc-token-name:
-    description: "Env var treated as a caller-supplied OIDC token. The action does not write a token into it. Must match the parent action when a previous step supplied a token."
+    description: "Environment variable that receives the OIDC token. When that variable is already set, the action leaves it unchanged. Must match the parent action."
     required: false
     default: "SNOWFLAKE_TOKEN"
 

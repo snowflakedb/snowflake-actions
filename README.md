@@ -44,8 +44,8 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. That reuse exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps, unless the variable is already set or an earlier step installed the CLI from the network. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
-| `use-oidc` | `false` | Authenticate with GitHub OIDC. Each `snow` command mints its own token. The action does not save the token. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var treated as a caller-supplied OIDC token. When that variable is already set, the action leaves it unchanged and does not write a token. |
+| `use-oidc` | `false` | Authenticate with GitHub OIDC. Bash steps export a token and replace it every 4 minutes. The token is not written to a file. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var that receives the OIDC token. When that variable is already set, the action leaves it unchanged. |
 | `oidc-audience` | (omitted) | `aud` claim for the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set. Otherwise the action requests `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true, in which case `oidc-audience` or `SNOWFLAKE_AUDIENCE` must be set. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
@@ -79,7 +79,7 @@ Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
 
-GitHub's token expires after 5 minutes. The action does not keep a copy. Snowflake CLI 3.33 reuses a token or a token file that is already set, so a saved token would be expired by the next `snow` command. Each command mints a new token in that process.
+GitHub's token expires after 5 minutes. Snowflake CLI 3.33 reuses a token that is already set, so bash steps export a new token and replace that variable every 4 minutes, before the next command. The token is not written to a file.
 
 **1. Create a service user in Snowflake** whose workload identity trusts your repo's GitHub OIDC tokens:
 
@@ -203,7 +203,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
 2. Installs the channel's Cortex Code release archive and checks it against the release manifest, unless `cortex-binary` is set or `cortex` is already on `PATH`.
 3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. A published archive is installed from that archive. Otherwise the installed CLI updates to that version. Fails before either step when `cortex-binary` is set or `cortex` was already on `PATH`.
-4. Sees that the parent action configured OIDC and writes `connections.toml` so `cortex -c <name>` works. The token is not written. If a connection with that name already exists, it skips (no overwrite).
+4. Sees that the parent action configured OIDC and writes `connections.toml` so `cortex -c <name>` works. The token stays in the environment and is not copied into the file. If a connection with that name already exists, it skips (no overwrite).
 
 ### Inputs
 
@@ -213,7 +213,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` installs that version's release archive when one is published, and otherwise runs `cortex update`. It fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
 | `cortex-binary` | none | Local Cortex Code executable. Skips the release-archive download. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var treated as a caller-supplied OIDC token. The action does not write a token. Match the parent action when a previous step supplied one. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var that receives the OIDC token. When that variable is already set, the action leaves it unchanged. Match the parent action. |
 | `oidc-audience` | (omitted) | `aud` claim when this action mints the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true. |
 
 ### Outputs

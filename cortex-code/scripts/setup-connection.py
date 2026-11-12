@@ -4,8 +4,8 @@
 Detection logic:
 1. If connection already exists in connections.toml -> skip (no overwrite).
 2. If the parent action configured OIDC (SF_CICD_AUTH_TYPE=oidc, or a token env
-   var a caller already set) -> write a workload-identity connection. The token
-   is not written. Each command mints its own.
+   var) -> write a workload-identity connection. The token stays in the
+   environment and is not copied into the file.
 3. If neither signal nor an existing connection -> skip gracefully (install-only mode).
 
 Requires Python 3.11+ (tomllib in stdlib).
@@ -67,9 +67,9 @@ def main() -> None:
         print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
         return
 
-    # The parent action sets SF_CICD_AUTH_TYPE and does not leave the token in
-    # the environment. A caller-supplied token is also a signal. Neither value
-    # is written into the connection.
+    # The parent action sets SF_CICD_AUTH_TYPE. A bash step may also export the
+    # token. A caller-supplied token is a signal too. The token is not written
+    # into the connection.
     token = env_optional(token_var)
     oidc_configured = env_optional("SF_CICD_AUTH_TYPE") == "oidc"
     if not token and not oidc_configured:

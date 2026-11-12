@@ -47,16 +47,15 @@ inputs:
     default: ""
 
   use-oidc:
-    description: "Enable OIDC authentication. Each later snow command mints its own GitHub OIDC token. The action does not save the token."
+    description: "Enable OIDC authentication. Bash steps export a GitHub OIDC token and replace it every 4 minutes. The token is not written to a file."
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Environment variable treated as a caller-supplied OIDC token. When that
-      variable is already set, the action leaves it unchanged. The action does
-      not write a token into it. Leave it at SNOWFLAKE_TOKEN unless a previous
-      step exported the token under another name.
+      Environment variable that receives the OIDC token. Bash steps replace it
+      every 4 minutes. When that variable is already set, the action leaves it
+      unchanged. Default SNOWFLAKE_TOKEN.
     required: false
     default: "SNOWFLAKE_TOKEN"
 

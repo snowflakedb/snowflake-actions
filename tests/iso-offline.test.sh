@@ -240,8 +240,10 @@ grep -q 'eyJhbGciOiJub25lIn0' "$GITHUB_ENV" \
     && fail "oidc-token: minted token was written to GITHUB_ENV"
 grep -q '_FILE_PATH=' "$GITHUB_ENV" \
     && fail "oidc-token: GITHUB_ENV published a token file"
-grep -q '^BASH_ENV=' "$GITHUB_ENV" \
-    && fail "oidc-token: BASH_ENV was set"
+grep -qx "BASH_ENV=${REPO_ROOT}/scripts/oidc-token-keepalive.sh" "$GITHUB_ENV" \
+    || fail "oidc-token: BASH_ENV does not refresh the token"
+grep -qx 'OIDC_TOKEN_NAME=SNOWFLAKE_TOKEN' "$GITHUB_ENV" \
+    || fail "oidc-token: token variable name was not published"
 if [ -e "$TEST_ROOT/oidc-state/token" ] || [ -e "$TEST_ROOT/oidc-state/refresh.pid" ]; then
     fail "oidc-token: token was written to disk"
 fi
@@ -438,9 +440,9 @@ grep -q '_FILE_PATH=' "$GITHUB_ENV" \
     && fail "oidc-token: reuse published a token file this action does not update"
 echo "PASS: oidc-token does not refresh a token it did not mint"
 
-# A mint checks that OIDC works, then drops the token. Nothing is written to
-# disk and the value is not copied into GITHUB_ENV, so a later snow command
-# mints its own instead of reusing an expired one.
+# A mint checks that OIDC works, then drops the token. Later bash steps export
+# a new token and replace it every 4 minutes. The token is not written to
+# GITHUB_ENV or to a file.
 REFRESH_DIR="$TEST_ROOT/oidc-refresh"
 mkdir -p "$REFRESH_DIR"
 COUNTER="$REFRESH_DIR/count"
@@ -472,9 +474,42 @@ grep -q 'token-1' "$GITHUB_ENV" \
 if [ -e "$REFRESH_DIR/token" ] || [ -e "$REFRESH_DIR/refresh.pid" ]; then
     fail "oidc-token: mint check wrote the token to disk"
 fi
-echo "PASS: oidc-token does not save the minted token"
+keepalive="$REPO_ROOT/scripts/oidc-token-keepalive.sh"
+refreshed="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$refreshed" = "token-2" ] || fail "oidc-token: bash step did not export a fresh token (got ${refreshed})"
+[ "$(cat "$COUNTER")" = "2" ] || fail "oidc-token: bash step did not mint"
+grep -q 'token-2' "$GITHUB_ENV" \
+    && fail "oidc-token: refreshed token was written to GITHUB_ENV"
+rotated="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_ISSUED_AT="$(date +%s)" \
+    SNOWFLAKE_TOKEN="token-2" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'OIDC_TOKEN_ISSUED_AT=0; printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$rotated" = "token-3" ] || fail "oidc-token: a later command did not replace a token older than the interval (got ${rotated})"
+[ "$(cat "$COUNTER")" = "3" ] || fail "oidc-token: stale token was not refreshed"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "${TMPDIR:-/tmp}/snowflake-oidc-refresh/token" ]; then
+    fail "oidc-token: refresh wrote the token to disk"
+fi
+echo "PASS: oidc-token refreshes the variable and does not write a file"
 unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH GITHUB_ENV COUNTER \
-    ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+    ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN BASH_ENV \
+    OIDC_TOKEN_ISSUED_AT || true
 
 # --- cortex: local binary does not curl ---
 cat > "$TEST_ROOT/bin/curl" << 'EOF'
