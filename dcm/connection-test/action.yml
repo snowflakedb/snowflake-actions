@@ -1,7 +1,5 @@
 # Snowflake DCM Test Connection Action
 #
-# Preview — Available to all accounts.
-#
 # Tests the Snowflake connection for a DCM target, validates that the
 # connection role matches the manifest project_owner, and checks if the
 # DCM project already exists.

@@ -267,8 +267,6 @@ On self-hosted runners that persist between jobs, add a cleanup step to remove c
 
 ## GitHub actions for DCM Projects
 
-> **Public Preview** — Features and interfaces may change before general availability.
-
 Four composite actions for automating [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) CI/CD pipelines. Each action handles one step of the lifecycle; compose them to build end-to-end workflows.
 
 | Action                                                     | Description                                                                                                                                                                      |

@@ -1,7 +1,5 @@
 # Snowflake DCM Parse Manifest Action
 #
-# Preview — Available to all accounts.
-#
 # Reads a DCM manifest.yml and outputs the list of target names as a
 # JSON array, ready to feed into a matrix strategy.
 #

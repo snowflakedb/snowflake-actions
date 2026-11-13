@@ -1,7 +1,5 @@
 # Snowflake DCM Deploy Action
 #
-# Preview — Available to all accounts.
-#
 # Runs `snow dcm deploy` against a target with optional drop detection.
 #
 # Prerequisites:
