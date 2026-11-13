@@ -1,7 +1,5 @@
 # Snowflake DCM GitHub Actions
 
-> **Preview — Available to all accounts.** These actions are in Preview. Features and interfaces may change before general availability.
-
 A set of **reusable composite GitHub Actions** for automating [Snowflake DCM Projects](https://docs.snowflake.com/en/user-guide/dcm-projects/dcm-projects-overview) pipelines. Each action handles one step of the lifecycle, and you can compose them in your own workflows to build end-to-end CI/CD pipelines.
 
 To use an action in your workflow, reference it with:

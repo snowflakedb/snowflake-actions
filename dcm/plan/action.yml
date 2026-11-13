@@ -1,7 +1,5 @@
 # Snowflake DCM Plan Action
 #
-# Preview — Available to all accounts.
-#
 # Runs `snow dcm plan` against a target, summarizes the changeset in the
 # GitHub Step Summary, and uploads the plan output as an artifact.
 #
