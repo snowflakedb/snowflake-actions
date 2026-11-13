@@ -30,12 +30,51 @@ dcm_manifest_value() {
   yq eval "$path" "$manifest"
 }
 
+# Record whether later `snow` steps should send a LOGIN_NAME.
+#
+# The CLI maps SNOWFLAKE_USER to the connector LOGIN_NAME. OIDC workload
+# identity authenticates the service user from the token. A service user often
+# has a NAME and no LOGIN_NAME, and sending either value fails the login with
+# a LOGIN_NAME mismatch. An empty value sets DCM_SNOWFLAKE_USER_SET=false and
+# does not write SNOWFLAKE_USER. Call dcm_apply_snowflake_user before `snow`
+# so a user inherited from the job environment does not leak into the request.
+#
+# A newline or carriage return is rejected. The Actions runner splits
+# $GITHUB_ENV on both, so either one would turn the rest of the line into
+# another assignment.
+#
+# Usage: dcm_export_snowflake_user [user]
+dcm_export_snowflake_user() {
+  local user="${1-}"
+  if [ -z "$user" ]; then
+    echo "DCM_SNOWFLAKE_USER_SET=false" >> "$GITHUB_ENV"
+    return 0
+  fi
+  case "$user" in
+    *$'\n'*|*$'\r'*)
+      echo "::error::snowflake-user must not contain a newline or carriage return"
+      return 1
+      ;;
+  esac
+  printf 'SNOWFLAKE_USER<<GH_EOF\n%s\nGH_EOF\n' "$user" >> "$GITHUB_ENV"
+  echo "DCM_SNOWFLAKE_USER_SET=true" >> "$GITHUB_ENV"
+}
+
+# Unset SNOWFLAKE_USER unless dcm_export_snowflake_user recorded a login name.
+dcm_apply_snowflake_user() {
+  if [ "${DCM_SNOWFLAKE_USER_SET:-}" = "true" ]; then
+    return 0
+  fi
+  unset SNOWFLAKE_USER
+}
+
 # Read the manifest target and export the Snowflake connection env vars.
 # Also writes project-name / manifest-account / manifest-role to $GITHUB_OUTPUT
 # so steps that need them (e.g. connection-test) can consume them.
 #
-# Required env: TARGET, SNOWFLAKE_USER
-# Optional env: MANIFEST_PATH (default: manifest.yml)
+# Required env: TARGET
+# Optional env: SNOWFLAKE_USER (LOGIN_NAME; leave empty for workload identity)
+#                MANIFEST_PATH (default: manifest.yml)
 dcm_read_manifest() {
   local manifest="${MANIFEST_PATH:-manifest.yml}"
 
@@ -48,7 +87,7 @@ dcm_read_manifest() {
   # can't inject extra env vars.
   printf 'SNOWFLAKE_ACCOUNT<<GH_EOF\n%s\nGH_EOF\n' "$account"   >> "$GITHUB_ENV"
   printf 'SNOWFLAKE_ROLE<<GH_EOF\n%s\nGH_EOF\n'    "$owner_role" >> "$GITHUB_ENV"
-  printf 'SNOWFLAKE_USER<<GH_EOF\n%s\nGH_EOF\n'    "$SNOWFLAKE_USER" >> "$GITHUB_ENV"
+  dcm_export_snowflake_user "${SNOWFLAKE_USER:-}"
 
   # Sanitized project name for use in artifact names. GitHub artifact names
   # disallow / \ : * ? " < > |, so replace every character that is not

@@ -278,6 +278,8 @@ Four composite actions for automating [Snowflake DCM Projects](https://docs.snow
 | `[dcm/plan](dcm/README.md#dcm-plan)`                       | Run `snow dcm plan`, write a color-coded changeset summary (🟩 CREATE 🟨 ALTER 🟥 DROP) to the Step Summary and optionally post it as a PR comment, and upload the plan artifact |
 | `[dcm/deploy](dcm/README.md#dcm-deploy)`                   | Run `snow dcm plan` then `snow dcm deploy` with optional drop detection and post-deploy SQL scripts; optionally post a deploy summary as a PR comment                            |
 
+Leave `snowflake-user` unset for OIDC workload identity. The CLI sends that value as `LOGIN_NAME`, and a service user often has none.
+
 ```yaml
 permissions:
   id-token: write
@@ -288,8 +290,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: DCM_STAGE
-    env:
-      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
     steps:
       - uses: actions/checkout@v7
 
@@ -297,20 +297,17 @@ jobs:
         with:
           target: DCM_STAGE
           project-path: my-dcm-project/
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
 
       - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:
           target: DCM_STAGE
           project-path: my-dcm-project/
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
       - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
         with:
           target: DCM_STAGE
           project-path: my-dcm-project/
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 ```
 

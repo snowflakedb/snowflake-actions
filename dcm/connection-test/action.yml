@@ -30,7 +30,8 @@
 #           with:
 #             target: DCM_STAGE
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
-#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
+#
+#   snowflake-user is optional. Leave it unset for OIDC workload identity.
 
 name: "Snowflake DCM Test Connection"
 description: "Test Snowflake connection for a DCM target, validate role match, and check project status."
@@ -46,8 +47,12 @@ inputs:
     description: "Path to the DCM project directory (containing manifest.yml)"
     required: true
   snowflake-user:
-    description: "Snowflake username for OIDC authentication"
-    required: true
+    description: >-
+      Snowflake LOGIN_NAME to send with the connection. Leave unset for OIDC
+      workload identity. A service user often has a NAME and no LOGIN_NAME, and
+      sending either value fails the login.
+    required: false
+    default: ""
   cli-artifact:
     description: >-
       Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
@@ -111,6 +116,8 @@ runs:
         TARGET_NAME: ${{ inputs.target }}
         MANIFEST_ROLE: ${{ steps.read_manifest.outputs.manifest-role }}
       run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_apply_snowflake_user
 
         CONNECTION_OUTPUT=$(snow connection test -x --format json 2>&1) && CONNECTION_RC=0 || CONNECTION_RC=$?
 

@@ -48,7 +48,7 @@ To set up OIDC:
    ```
 
 3. Create a GitHub Environment for each DCM target (e.g. `DCM_STAGE`, `DCM_PROD_US`) — the environment name must match the `SUBJECT` claim
-4. Set `SNOWFLAKE_USER` in the workflow `env` block to the service user name
+4. Leave `snowflake-user` unset, and do not set `SNOWFLAKE_USER` on the job. Workload identity authenticates the service user from the OIDC token, and the account comes from the manifest. The CLI sends `SNOWFLAKE_USER` as `LOGIN_NAME`. A `TYPE = SERVICE` user often has a `NAME` and no `LOGIN_NAME`; passing the name fails the login. Pass `snowflake-user` only when that user has a `LOGIN_NAME` that must be sent.
 5. Grant the workflow `id-token: write` and `contents: read` permissions (see [Prerequisites](#prerequisites) for the full block)
 
 ## Prerequisites
@@ -211,7 +211,6 @@ Account validation is case-insensitive and compares the portion before the first
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
-    snowflake-user: ${{ env.SNOWFLAKE_USER }}
 ```
 
 ### Inputs
@@ -220,7 +219,7 @@ Account validation is case-insensitive and compares the portion before the first
 |-------|----------|-------------|
 | `target` | yes | DCM target name from `manifest.yml` |
 | `project-path` | yes | Path to the DCM project directory |
-| `snowflake-user` | yes | Snowflake username for authentication |
+| `snowflake-user` | no | Snowflake `LOGIN_NAME`. Leave unset for OIDC workload identity. Sending a name when the service user has no `LOGIN_NAME` fails the login |
 | `cli-artifact` | no | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
 | `oidc-audience` | no | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 
@@ -246,7 +245,6 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
-    snowflake-user: ${{ env.SNOWFLAKE_USER }}
     comment-on-pr: "true"
 ```
 
@@ -256,7 +254,7 @@ Setting `plan-delta: "true"` runs [`snow dcm plan --delta`](https://docs.snowfla
 |-------|----------|---------|-------------|
 | `target` | yes | | DCM target name from `manifest.yml` |
 | `project-path` | yes | | Path to the DCM project directory |
-| `snowflake-user` | yes | | Snowflake username for authentication |
+| `snowflake-user` | no | `""` | Snowflake `LOGIN_NAME`. Leave unset for OIDC workload identity. Sending a name when the service user has no `LOGIN_NAME` fails the login |
 | `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
 | `oidc-audience` | no | (omitted) | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 | `create-if-not-exists` | no | `true` | Run `snow dcm create --if-not-exists` before planning |
@@ -289,7 +287,6 @@ The deploy output is written to the GitHub Step Summary and, when enabled, poste
   with:
     target: DCM_STAGE
     project-path: my-dcm-project/
-    snowflake-user: ${{ env.SNOWFLAKE_USER }}
     allow-drops: "false"
     comment-on-pr: "true"
 ```
@@ -300,7 +297,7 @@ The deploy output is written to the GitHub Step Summary and, when enabled, poste
 |-------|----------|---------|-------------|
 | `target` | yes | | DCM target name from `manifest.yml` |
 | `project-path` | yes | | Path to the DCM project directory. Deploy copies it to a temporary folder and runs from that copy. |
-| `snowflake-user` | yes | | Snowflake username for authentication |
+| `snowflake-user` | no | `""` | Snowflake `LOGIN_NAME`. Leave unset for OIDC workload identity. Sending a name when the service user has no `LOGIN_NAME` fails the login |
 | `cli-artifact` | no | `""` | Local Snowflake CLI wheel, sdist, or wheel directory. Forwarded to CLI setup and installed offline. Offline setup exports `SNOWFLAKE_CLI_AIR_GAPPED=true` unless that variable is already set |
 | `oidc-audience` | no | (omitted) | OIDC `aud` claim forwarded to CLI setup. Omitted is empty. Empty uses `SNOWFLAKE_AUDIENCE` when set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true |
 | `allow-drops` | no | `false` | Set to `true` to skip destructive drop detection |
@@ -329,7 +326,6 @@ on:
 
 env:
   DCM_PROJECT_PATH: my-dcm-project/
-  SNOWFLAKE_USER: SVC_GITHUB_ACTIONS
 
 jobs:
   # ---- STAGE ----
@@ -347,20 +343,17 @@ jobs:
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
 
       - uses: snowflakedb/snowflake-actions/dcm/plan@v3
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
       - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
         with:
           target: DCM_STAGE
           project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
   # ---- PROD ----
@@ -379,13 +372,11 @@ jobs:
         with:
           target: DCM_PROD_US
           project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 
       - uses: snowflakedb/snowflake-actions/dcm/deploy@v3
         with:
           target: DCM_PROD_US
           project-path: ${{ env.DCM_PROJECT_PATH }}
-          snowflake-user: ${{ env.SNOWFLAKE_USER }}
           comment-on-pr: "true"
 ```

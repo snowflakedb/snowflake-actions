@@ -30,8 +30,9 @@
 #           with:
 #             target: DCM_STAGE
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
-#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
 #             comment-on-pr: "true"
+#
+#   snowflake-user is optional. Leave it unset for OIDC workload identity.
 #
 #   Set plan-delta: "true" to run `snow dcm plan --delta`, which evaluates only
 #   the definitions changed since the last deployment plus any definitions that
@@ -59,8 +60,12 @@ inputs:
     description: "Path to the DCM project directory (containing manifest.yml)"
     required: true
   snowflake-user:
-    description: "Snowflake username for OIDC authentication"
-    required: true
+    description: >-
+      Snowflake LOGIN_NAME to send with the connection. Leave unset for OIDC
+      workload identity. A service user often has a NAME and no LOGIN_NAME, and
+      sending either value fails the login.
+    required: false
+    default: ""
   cli-artifact:
     description: >-
       Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
@@ -135,6 +140,7 @@ runs:
         PLAN_DELTA: ${{ inputs.plan-delta }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_apply_snowflake_user
 
         export GHA_SUMMARY_FILE="/tmp/dcm-plan-summary.md"
         : > "$GHA_SUMMARY_FILE"
