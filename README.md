@@ -9,7 +9,7 @@ The action installs the Snowflake CLI in your workflow and can configure authent
 1. Installs `uv`, unless `snow` is already on `PATH` or `cli-artifact` points at a local wheel (those paths do not download `uv`).
 2. Installs the Snowflake CLI with `uv tool install --python 3.11` into an isolated tool environment. The `snow` command is available in later steps. A preinstalled `snow` is reused when `cli-version` is left empty.
 3. Copies your `config.toml` to `~/.snowflake/` if present (skipped if the file doesn't exist).
-4. With `use-oidc: true`, reads a GitHub OIDC token and sets the workload-identity environment variables the CLI expects.
+4. With `use-oidc: true`, sets the workload-identity environment variables the CLI reads. `snow` mints a GitHub OIDC token on each command. This action does not export that token.
 
 ## Example workflow
 
@@ -44,8 +44,8 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `cli-version` | (omitted) | CLI version to install (e.g. `3.20.0`). An omitted value is empty. Empty reuses a `snow` already on `PATH` and does not download. That reuse exports `SNOWFLAKE_CLI_AIR_GAPPED=true` for later steps, unless the variable is already set or an earlier step installed the CLI from the network. If `snow` is not on `PATH`, empty installs the latest release from PyPI. The string `latest` always installs from PyPI. |
-| `use-oidc` | `false` | Authenticate with a GitHub OIDC token. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the OIDC token is exported as. |
+| `use-oidc` | `false` | Authenticate with GitHub OIDC. `snow` mints a token on each command. This action does not export one. Cortex Code does not mint; that path still exports the token. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var the Cortex Code path exports the token into. The Snowflake CLI path ignores this and does not export a token. |
 | `oidc-audience` | (omitted) | `aud` claim for the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set. Otherwise the action requests `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true, in which case `oidc-audience` or `SNOWFLAKE_AUDIENCE` must be set. |
 | `default-config-file-path` | `./config.toml` | Path to your `config.toml`. |
 | `custom-github-ref` | none | Install the CLI from a branch, tag, or commit. |
@@ -78,6 +78,8 @@ Use OIDC. It stores no secrets and is the only method we recommend. Key-pair and
 ### OIDC (recommended)
 
 GitHub issues a short-lived OIDC token that Snowflake validates directly, so no private keys are stored as secrets. Requires CLI `3.11+`.
+
+The action sets `SNOWFLAKE_AUTHENTICATOR`, `SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER`, and `SNOWFLAKE_AUDIENCE`. It does not export a token. CLI 3.33 reuses a token that is already set, and a GitHub OIDC token expires after about 5 minutes, so a token from the start of a long job is expired by a later `snow` command. Each `snow` command mints a new token when `token` and `token_file_path` are empty. A `SNOWFLAKE_TOKEN` the job already set is left unchanged, and the CLI reuses it.
 
 **1. Create a service user in Snowflake** whose workload identity trusts your repo's GitHub OIDC tokens:
 
@@ -186,7 +188,7 @@ Runs on Linux, macOS, and Windows GitHub-hosted runners.
 
 ## Cortex Code CLI action
 
-A companion action that installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. Requires `snowflakedb/snowflake-actions@v3` to run first (provides `snow` CLI and OIDC auth).
+A companion action that installs and configures the [Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli) (`cortex`) for CI/CD workflows. Requires `snowflakedb/snowflake-actions@v3` to run first (provides the `snow` CLI). Set `use-oidc: true` here as well: Cortex mints and exports its own token, and the Snowflake CLI action does not.
 
 ```yaml
 - uses: snowflakedb/snowflake-actions@v3
@@ -194,6 +196,8 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
     use-oidc: true
 
 - uses: snowflakedb/snowflake-actions/cortex-code@v3
+  with:
+    use-oidc: true
 ```
 
 ### How it works
@@ -201,7 +205,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 1. Verifies `snow` CLI is on PATH (fails fast if parent action wasn't used).
 2. Installs the channel's Cortex Code release archive and checks it against the release manifest, unless `cortex-binary` is set or `cortex` is already on `PATH`.
 3. Pins a specific version when `cli-version` is not `latest` and Cortex was just downloaded. A published archive is installed from that archive. Otherwise the installed CLI updates to that version. Fails before either step when `cortex-binary` is set or `cortex` was already on `PATH`.
-4. Auto-detects `SNOWFLAKE_TOKEN` in the environment (set by parent action's OIDC flow) and writes `connections.toml` so `cortex -c <name>` works. If a connection with that name already exists, it skips (no overwrite).
+4. With `use-oidc: true`, mints a GitHub OIDC token and exports it (default `SNOWFLAKE_TOKEN`). Writes a workload-identity connection with no token in the file so `cortex -c <name>` can read that variable. Cortex does not mint its own token. The Snowflake CLI action does not export one, so set `use-oidc: true` on this action. If a connection with that name already exists, it skips (no overwrite). A job that enables both still has `SNOWFLAKE_TOKEN` set after this step, and a later `snow` command reuses that token.
 
 ### Inputs
 
@@ -211,7 +215,7 @@ A companion action that installs and configures the [Cortex Code CLI](https://do
 | `cli-version` | `latest` | Version to install (e.g. `1.5.2`). Requires the version to be available in the channel. A value other than `latest` installs that version's release archive when one is published, and otherwise runs `cortex update`. It fails when `cortex-binary` is set or `cortex` is already on `PATH`. |
 | `cortex-binary` | none | Local Cortex Code executable. Skips the release-archive download. The download is also skipped when `cortex` is already on `PATH`. Cannot be combined with a pinned `cli-version`. |
 | `connection-name` | `default` | Connection name written to `connections.toml`. |
-| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var name containing the OIDC token. Must match parent action's `oidc-token-name` if overridden. |
+| `oidc-token-name` | `SNOWFLAKE_TOKEN` | Env var this action exports the OIDC token into. Cortex reads `SNOWFLAKE_TOKEN` for a workload-identity connection. |
 | `oidc-audience` | (omitted) | `aud` claim when this action mints the OIDC token. An omitted value is empty. Empty uses `SNOWFLAKE_AUDIENCE` when that is already set, otherwise `snowflakecomputing.com`, unless `SNOWFLAKE_CLI_AIR_GAPPED` is true. |
 
 ### Outputs
@@ -244,6 +248,7 @@ jobs:
 
       - uses: snowflakedb/snowflake-actions/cortex-code@v3
         with:
+          use-oidc: true
           cli-channel: beta
 
       - run: cortex exec --file .cortex/prompts/scan.md -c default --bypass --no-history
