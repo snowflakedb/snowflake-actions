@@ -47,16 +47,16 @@ inputs:
     default: ""
 
   use-oidc:
-    description: "Enable OIDC authentication"
+    description: >-
+      Enable OIDC authentication. snow mints a token on each command. This
+      action does not export one.
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Name of the token environment variable for OIDC authentication. By default it is set for
-      temporary connections
-      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
-      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
+      Ignored. snow mints the OIDC token on each command, so this action does
+      not export one. Kept so workflows that already pass it keep working.
     required: false
     default: "SNOWFLAKE_TOKEN"
 
@@ -118,7 +118,6 @@ runs:
       if: ${{ inputs.use-oidc == 'true' }}
       shell: bash
       env:
-        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
         OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/../scripts/configure-snowflake-oidc.sh
 

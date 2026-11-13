@@ -78,8 +78,7 @@ def main() -> None:
             return
         print(
             f"No {token_var} in environment and no connections.toml found. "
-            "Skipping connection setup. To enable, set use-oidc: true on this action "
-            "(or run snowflakedb/snowflake-actions@v3 with use-oidc: true before it)."
+            "Skipping connection setup. To enable, set use-oidc: true on this action."
         )
         return
 
