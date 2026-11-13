@@ -3,8 +3,10 @@
 
 Detection logic:
 1. If connection already exists in connections.toml -> skip (no overwrite).
-2. If OIDC token is set in env (parent action configured OIDC) -> write connection using env vars.
-3. If neither token nor existing connection -> skip gracefully (install-only mode).
+2. If the parent action configured OIDC (SF_CICD_AUTH_TYPE=oidc, or a token env
+   var) -> write a workload-identity connection. The token stays in the
+   environment and is not copied into the file.
+3. If neither signal nor an existing connection -> skip gracefully (install-only mode).
 
 Requires Python 3.11+ (tomllib in stdlib).
 """
@@ -65,9 +67,21 @@ def main() -> None:
         print(f"Connection [{conn_name}] already exists in {conn_file}. Skipping.")
         return
 
-    # Auto-detect: look for OIDC token from parent action
+    # The parent action sets SF_CICD_AUTH_TYPE. A bash step may also export the
+    # token. A caller-supplied token is a signal too. The token is not written
+    # into the connection.
+    #
+    # Snowflake CLI merges SNOWFLAKE_TOKEN into every connection and, on 3.33,
+    # mints only when token and token_file_path are both empty. The Python
+    # connector does not read SNOWFLAKE_TOKEN into a named connection loaded
+    # from this file; OIDC there requires the token on the connection. Cortex
+    # Code 1.1.104 does: for authenticator WORKLOAD_IDENTITY it uses
+    # SNOWFLAKE_TOKEN when the connection has no token. Set oidc-token-name
+    # to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to supply only that named
+    # connection for snow.
     token = env_optional(token_var)
-    if not token:
+    oidc_configured = env_optional("SF_CICD_AUTH_TYPE") == "oidc"
+    if not token and not oidc_configured:
         # No token -- if the file already defines connections, leave them for
         # the user; otherwise there is nothing to do (install-only mode).
         if existing:
@@ -88,7 +102,7 @@ def main() -> None:
     user = env_optional("SNOWFLAKE_USER")
     if not account or not user:
         error(
-            f"{token_var} is set but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
+            "OIDC is configured but SNOWFLAKE_ACCOUNT and/or SNOWFLAKE_USER are missing. "
             "Set these as env vars in your workflow."
         )
 

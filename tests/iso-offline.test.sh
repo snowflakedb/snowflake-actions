@@ -21,7 +21,19 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
 }
 
 TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+cleanup() {
+    local pidfile pid
+    if [ -n "${TEST_ROOT:-}" ] && [ -d "$TEST_ROOT" ]; then
+        while IFS= read -r pidfile; do
+            pid="$(tr -d '[:space:]' < "$pidfile" 2>/dev/null || true)"
+            if [ -n "$pid" ]; then
+                kill "$pid" 2>/dev/null || true
+            fi
+        done < <(find "$TEST_ROOT" -name refresh.pid -type f 2>/dev/null || true)
+    fi
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
 
 # Isolated PATH: real python3 stays available, curl/uv/snow are the fakes we add.
 REAL_PYTHON_DIR="$(dirname "$(command -v python3)")"
@@ -196,7 +208,7 @@ grep -q 'uv is not on PATH' "$TEST_ROOT/missing-uv.out" \
 echo "PASS: cli-artifact without uv fails loudly"
 
 # --- oidc audience is forwarded into the token request and GITHUB_ENV ---
-unset SNOWFLAKE_TOKEN || true
+unset SNOWFLAKE_TOKEN BASH_ENV || true
 cat > "$TEST_ROOT/bin/curl" << 'EOF'
 #!/bin/sh
 printf '%s\n' "$*" > "$CURL_LOG"
@@ -222,6 +234,19 @@ grep -q 'audience=snowflake.iso.example%2Faud' "$CURL_LOG" \
     || fail "oidc-token: audience was not URL-encoded into the request"
 grep -qx 'SNOWFLAKE_AUDIENCE=snowflake.iso.example/aud' "$GITHUB_ENV" \
     || fail "oidc-token: GITHUB_ENV audience was not the override"
+grep -qx 'SF_CICD_AUTH_TYPE=oidc' "$GITHUB_ENV" \
+    || fail "oidc-token: GITHUB_ENV did not record oidc auth"
+grep -q 'eyJhbGciOiJub25lIn0' "$GITHUB_ENV" \
+    && fail "oidc-token: minted token was written to GITHUB_ENV"
+grep -q '_FILE_PATH=' "$GITHUB_ENV" \
+    && fail "oidc-token: GITHUB_ENV published a token file"
+grep -qx "BASH_ENV=${REPO_ROOT}/scripts/oidc-token-keepalive.sh" "$GITHUB_ENV" \
+    || fail "oidc-token: BASH_ENV does not refresh the token"
+grep -qx 'OIDC_TOKEN_NAME=SNOWFLAKE_TOKEN' "$GITHUB_ENV" \
+    || fail "oidc-token: token variable name was not published"
+if [ -e "$TEST_ROOT/oidc-state/token" ] || [ -e "$TEST_ROOT/oidc-state/refresh.pid" ]; then
+    fail "oidc-token: token was written to disk"
+fi
 grep -q 'snowflakecomputing.com' "$CURL_LOG" \
     && fail "oidc-token: commercial audience leaked into the request"
 echo "PASS: oidc-token requests the configured audience"
@@ -395,6 +420,372 @@ grep -qx 'SNOWFLAKE_AUDIENCE=iso.example' "$GITHUB_ENV" \
 grep -qx 'SNOWFLAKE_AUDIENCE=snowflakecomputing.com' "$GITHUB_ENV" \
     && fail "configure: hardcoded commercial audience overwrote the override"
 echo "PASS: configure-snowflake-oidc publishes the override audience"
+
+# A token the job already supplied is not rotated.
+REUSE_DIR="$TEST_ROOT/oidc-reuse-refresh"
+GITHUB_ENV="$TEST_ROOT/reuse-no-refresh.env"
+: > "$GITHUB_ENV"
+OIDC_TOKEN_REFRESH=true \
+OIDC_REFRESH_STATE_DIR="$REUSE_DIR" \
+OIDC_TOKEN_REFRESH_INTERVAL=1 \
+SNOWFLAKE_TOKEN="$(jwt_with_aud "iso.example")" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" \
+    || fail "oidc-token: reuse with refresh enabled should succeed"
+[ ! -e "$REUSE_DIR/refresh.pid" ] \
+    || fail "oidc-token: reusing a supplied token started a refresher"
+grep -q '_FILE_PATH=' "$GITHUB_ENV" \
+    && fail "oidc-token: reuse published a token file this action does not update"
+echo "PASS: oidc-token does not refresh a token it did not mint"
+
+# A mint checks that OIDC works, then drops the token. Later bash steps mint a
+# new token in the background every 4 minutes. The token is not written to
+# GITHUB_ENV or to a file.
+REFRESH_DIR="$TEST_ROOT/oidc-refresh"
+mkdir -p "$REFRESH_DIR"
+COUNTER="$REFRESH_DIR/count"
+printf '0' > "$COUNTER"
+export COUNTER
+cat > "$TEST_ROOT/bin/curl" << 'EOF'
+#!/bin/sh
+n=$(cat "$COUNTER")
+n=$((n + 1))
+printf '%s' "$n" > "$COUNTER"
+printf '%s' "{\"value\":\"token-$n\"}"
+EOF
+chmod +x "$TEST_ROOT/bin/curl"
+unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH BASH_ENV || true
+GITHUB_ENV="$TEST_ROOT/refresh-github.env"
+: > "$GITHUB_ENV"
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/oidc-token.sh" \
+    || fail "oidc-token: mint check should succeed"
+[ "$(cat "$COUNTER")" = "1" ] || fail "oidc-token: mint check did not request a token"
+grep -qx 'SF_CICD_AUTH_TYPE=oidc' "$GITHUB_ENV" \
+    || fail "oidc-token: mint check did not record oidc auth"
+grep -q 'token-1' "$GITHUB_ENV" \
+    && fail "oidc-token: mint check wrote the token into GITHUB_ENV"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "$REFRESH_DIR/refresh.pid" ]; then
+    fail "oidc-token: mint check wrote the token to disk"
+fi
+keepalive="$REPO_ROOT/scripts/oidc-token-keepalive.sh"
+refreshed="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$refreshed" = "token-2" ] || fail "oidc-token: bash step did not export a fresh token (got ${refreshed})"
+[ "$(cat "$COUNTER")" = "2" ] || fail "oidc-token: bash step did not mint"
+grep -q 'token-2' "$GITHUB_ENV" \
+    && fail "oidc-token: refreshed token was written to GITHUB_ENV"
+rotated="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_ISSUED_AT="$(date +%s)" \
+    SNOWFLAKE_TOKEN="token-2" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'OIDC_TOKEN_ISSUED_AT=0; printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$rotated" = "token-3" ] || fail "oidc-token: a later command did not replace a token older than the interval (got ${rotated})"
+[ "$(cat "$COUNTER")" = "3" ] || fail "oidc-token: stale token was not refreshed"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "${TMPDIR:-/tmp}/snowflake-oidc-refresh/token" ]; then
+    fail "oidc-token: refresh wrote the token to disk"
+fi
+
+# The background child mints on the interval while this shell is idle.
+# The next command exports that token. Nothing is written to a file.
+before_bg="$(cat "$COUNTER")"
+prefetched="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_REFRESH_INTERVAL=1 \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c '
+        start=$SNOWFLAKE_TOKEN
+        i=0
+        while [ "$i" -lt 8 ]; do
+            i=$((i + 1))
+            sleep 1
+            [ "$SNOWFLAKE_TOKEN" != "$start" ] && break
+        done
+        printf %s "$SNOWFLAKE_TOKEN"
+    ' | tail -n 1
+)"
+sync_n=$((before_bg + 1))
+prefetched_n="${prefetched#token-}"
+case "$prefetched_n" in
+    ''|*[!0-9]*) fail "oidc-token: background refresh did not export a token (got ${prefetched})" ;;
+esac
+[ "$prefetched_n" -gt "$sync_n" ] \
+    || fail "oidc-token: background refresh did not pre-mint (got ${prefetched}, first mint was token-${sync_n})"
+grep -q "$prefetched" "$GITHUB_ENV" \
+    && fail "oidc-token: background token was written to GITHUB_ENV"
+# The child stays in the step's process group. Once that shell exits it stops
+# minting. A detached refresher would keep writing tokens after this.
+after_bg="$(cat "$COUNTER")"
+sleep 2
+[ "$(cat "$COUNTER")" = "$after_bg" ] \
+    || fail "oidc-token: background refresh kept minting after the step exited"
+if [ -e "$REFRESH_DIR/token" ] || [ -e "$REFRESH_DIR/refresh.pid" ] \
+    || [ -e "${TMPDIR:-/tmp}/snowflake-oidc-refresh/token" ]; then
+    fail "oidc-token: background refresh wrote the token to disk"
+fi
+
+# A token the job supplied is not replaced by the background loop.
+supplied_before="$(cat "$COUNTER")"
+supplied_out="$(
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    OIDC_TOKEN_SUPPLIED=true \
+    OIDC_TOKEN_REFRESH_INTERVAL=1 \
+    SNOWFLAKE_TOKEN="supplied-token" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'sleep 2; printf %s "$SNOWFLAKE_TOKEN"' | tail -n 1
+)"
+[ "$supplied_out" = "supplied-token" ] \
+    || fail "oidc-token: background refresh replaced a supplied token (got ${supplied_out})"
+[ "$(cat "$COUNTER")" = "$supplied_before" ] \
+    || fail "oidc-token: background refresh minted for a supplied token"
+
+# A token set on a later step, with no job-level supplied flag, is left unchanged.
+step_before="$(cat "$COUNTER")"
+step_out="$(
+    env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+        -u OIDC_REFRESH_FD -u OIDC_KEEPALIVE_ENTER \
+    BASH_ENV="$keepalive" \
+    SNOWFLAKE_AUDIENCE="iso.example" \
+    OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+    SNOWFLAKE_TOKEN="user-step-token" \
+    ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+    GITHUB_ENV="$GITHUB_ENV" \
+    COUNTER="$COUNTER" \
+    bash -c 'printf %s "$SNOWFLAKE_TOKEN"'
+)"
+[ "$step_out" = "user-step-token" ] \
+    || fail "oidc-token: a step-level token was replaced (got ${step_out})"
+[ "$(cat "$COUNTER")" = "$step_before" ] \
+    || fail "oidc-token: a step-level token was minted over"
+echo "PASS: a token already set in the step is left unchanged"
+
+# set -x must not print the token or the Actions request token before the mask.
+x_before="$(cat "$COUNTER")"
+x_out="$TEST_ROOT/xtrace.out"
+x_err="$TEST_ROOT/xtrace.err"
+env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+    -u OIDC_REFRESH_FD -u SNOWFLAKE_TOKEN -u OIDC_KEEPALIVE_ENTER \
+BASH_ENV="$keepalive" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+GITHUB_ENV="$GITHUB_ENV" \
+COUNTER="$COUNTER" \
+    bash -x -c 'set +x; printf %s "$SNOWFLAKE_TOKEN"' >"$x_out" 2>"$x_err"
+x_n=$((x_before + 1))
+grep -F "token-${x_n}" "$x_err" \
+    && fail "oidc-token: xtrace printed the OIDC token"
+grep -F "request-token" "$x_err" \
+    && fail "oidc-token: xtrace printed the Actions request token"
+grep -F "::add-mask::token-${x_n}" "$x_out" \
+    || fail "oidc-token: mask was not written for the minted token"
+echo "PASS: xtrace does not print the token before the mask"
+
+# A command that redirects stdout must not capture ::add-mask::.
+redir_before="$(cat "$COUNTER")"
+redir_file="$TEST_ROOT/redir-cmd.out"
+redir_stdout="$TEST_ROOT/redir-step.out"
+env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+    -u OIDC_REFRESH_FD -u SNOWFLAKE_TOKEN -u OIDC_KEEPALIVE_ENTER \
+BASH_ENV="$keepalive" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+GITHUB_ENV="$GITHUB_ENV" \
+COUNTER="$COUNTER" \
+REDIR_FILE="$redir_file" \
+    bash -c '{ printf %s "$SNOWFLAKE_TOKEN"; } > "$REDIR_FILE"' \
+    >"$redir_stdout"
+redir_n=$((redir_before + 1))
+[ "$(cat "$redir_file")" = "token-${redir_n}" ] \
+    || fail "oidc-token: redirected command did not print the token (got $(cat "$redir_file"))"
+grep -F '::add-mask::' "$redir_file" \
+    && fail "oidc-token: command redirect captured ::add-mask::"
+grep -F "::add-mask::token-${redir_n}" "$redir_stdout" \
+    || fail "oidc-token: mask did not reach the step stdout"
+echo "PASS: ::add-mask:: stays on the step stdout"
+
+# A down endpoint is reported once, and curl is given a timeout.
+CURL_ARGS="$TEST_ROOT/curl-args.txt"
+: > "$CURL_ARGS"
+cat > "$TEST_ROOT/bin/curl" << 'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$CURL_ARGS"
+exit 1
+EOF
+chmod +x "$TEST_ROOT/bin/curl"
+fail_err="$TEST_ROOT/oidc-fail.err"
+fail_out="$TEST_ROOT/oidc-fail.out"
+env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+    -u OIDC_REFRESH_FD -u SNOWFLAKE_TOKEN -u OIDC_KEEPALIVE_ENTER \
+BASH_ENV="$keepalive" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+OIDC_TOKEN_REFRESH_INTERVAL=1 \
+OIDC_TOKEN_FIRST_WAIT=1 \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+GITHUB_ENV="$GITHUB_ENV" \
+CURL_ARGS="$CURL_ARGS" \
+    bash -c 'sleep 3; printf %s "leftover=${SNOWFLAKE_TOKEN}"' >"$fail_out" 2>"$fail_err"
+fail_errors="$(grep -c '::error::' "$fail_err" || true)"
+[ "$fail_errors" -eq 1 ] \
+    || fail "oidc-token: a down endpoint was reported ${fail_errors} times"
+grep -q 'leftover=' "$fail_out" \
+    || fail "oidc-token: a failed refresh stopped the step"
+grep -q -- '--max-time' "$CURL_ARGS" \
+    || fail "oidc-token: curl was not given --max-time"
+echo "PASS: a down OIDC endpoint warns once and curl has a timeout"
+
+# A bash python and curl must not re-enter the keepalive.
+REAL_PY="${REAL_PYTHON_DIR}/python3"
+[ -x "$REAL_PY" ] || fail "oidc-token: real python3 missing"
+PYCOUNT="$TEST_ROOT/pycount"
+CURLCOUNT="$TEST_ROOT/curlcount"
+HELPER_LOG="$TEST_ROOT/helper-bash-env.log"
+printf '0' > "$PYCOUNT"
+printf '0' > "$CURLCOUNT"
+: > "$HELPER_LOG"
+cat > "$TEST_ROOT/bin/python3" << EOF
+#!/usr/bin/env bash
+n=\$(cat "$PYCOUNT")
+n=\$((n + 1))
+printf '%s' "\$n" > "$PYCOUNT"
+if [ -n "\${BASH_ENV:-}" ]; then
+  printf '%s\n' "python saw BASH_ENV" >> "$HELPER_LOG"
+fi
+if [ "\$n" -gt 40 ]; then
+  echo "python reentered \$n times" >&2
+  exit 99
+fi
+exec "$REAL_PY" "\$@"
+EOF
+chmod +x "$TEST_ROOT/bin/python3"
+cat > "$TEST_ROOT/bin/curl" << EOF
+#!/usr/bin/env bash
+n=\$(cat "$CURLCOUNT")
+n=\$((n + 1))
+printf '%s' "\$n" > "$CURLCOUNT"
+if [ -n "\${BASH_ENV:-}" ]; then
+  printf '%s\n' "curl saw BASH_ENV" >> "$HELPER_LOG"
+fi
+if [ "\$n" -gt 10 ]; then
+  echo "curl reentered \$n times" >&2
+  exit 99
+fi
+printf '%s' '{"value":"token-shim"}'
+EOF
+chmod +x "$TEST_ROOT/bin/curl"
+shim_out="$TEST_ROOT/shim.out"
+shim_err="$TEST_ROOT/shim.err"
+set +e
+env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+    -u OIDC_REFRESH_FD -u SNOWFLAKE_TOKEN -u OIDC_KEEPALIVE_ENTER \
+BASH_ENV="$keepalive" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+GITHUB_ENV="$GITHUB_ENV" \
+PYCOUNT="$PYCOUNT" \
+CURLCOUNT="$CURLCOUNT" \
+HELPER_LOG="$HELPER_LOG" \
+    timeout 5 bash -c 'printf %s "$SNOWFLAKE_TOKEN"' >"$shim_out" 2>"$shim_err"
+shim_rc=$?
+set -e
+[ "$shim_rc" -eq 0 ] || fail "oidc-token: bash python/curl re-entered (rc ${shim_rc})"
+grep -q 'token-shim' "$shim_out" \
+    || fail "oidc-token: bash shim mint did not export the token (got $(cat "$shim_out"))"
+[ ! -s "$HELPER_LOG" ] || fail "oidc-token: mint helper inherited BASH_ENV ($(cat "$HELPER_LOG"))"
+[ "$(cat "$PYCOUNT")" -le 40 ] || fail "oidc-token: python re-entered"
+[ "$(cat "$CURLCOUNT")" -le 10 ] || fail "oidc-token: curl re-entered"
+echo "PASS: bash python and curl do not re-enter the keepalive"
+
+# A second install must not point the BASH_ENV wrapper at itself.
+double_root="$TEST_ROOT/double-install"
+mkdir -p "$double_root"
+double_env="$double_root/github.env"
+: > "$double_env"
+user_env="$double_root/user-bash-env.sh"
+cat > "$user_env" << 'EOF'
+printf '%s\n' user-sourced
+python3 -c 'print(1)'
+EOF
+wrapper="$double_root/snowflake-oidc-refresh/bash-env.sh"
+(
+    unset OIDC_KEEPALIVE_LOADED OIDC_KEEPALIVE_ENTER OIDC_REFRESH_FD || true
+    export RUNNER_TEMP="$double_root"
+    export GITHUB_ENV="$double_env"
+    export BASH_ENV="$user_env"
+    # shellcheck disable=SC1091
+    . "$REPO_ROOT/scripts/oidc-token-env.sh"
+    oidc_install_keepalive
+    oidc_install_keepalive
+)
+[ -f "$wrapper" ] || fail "oidc-token: keepalive wrapper was not written"
+grep -q -F "$user_env" "$wrapper" \
+    || fail "oidc-token: wrapper dropped the original BASH_ENV"
+grep -q -F "$wrapper" "$wrapper" \
+    && fail "oidc-token: wrapper sources itself"
+double_out="$double_root/step.out"
+double_err="$double_root/step.err"
+set +e
+env -u OIDC_TOKEN_SUPPLIED -u OIDC_TOKEN_ISSUED_AT -u OIDC_KEEPALIVE_LOADED \
+    -u OIDC_REFRESH_FD -u SNOWFLAKE_TOKEN -u OIDC_KEEPALIVE_ENTER \
+BASH_ENV="$wrapper" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+OIDC_TOKEN_NAME="SNOWFLAKE_TOKEN" \
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+GITHUB_ENV="$double_env" \
+PYCOUNT="$PYCOUNT" \
+CURLCOUNT="$CURLCOUNT" \
+HELPER_LOG="$HELPER_LOG" \
+    timeout 5 bash -c 'printf ok' >"$double_out" 2>"$double_err"
+double_rc=$?
+set -e
+[ "$double_rc" -eq 0 ] || fail "oidc-token: second keepalive install hung (rc ${double_rc})"
+grep -q 'user-sourced' "$double_out" \
+    || fail "oidc-token: wrapper did not source the original BASH_ENV"
+echo "PASS: a second keepalive install does not wrap itself"
+echo "PASS: oidc-token refreshes the variable in the background and does not write a file"
+unset SNOWFLAKE_TOKEN SNOWFLAKE_TOKEN_FILE_PATH GITHUB_ENV COUNTER \
+    ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN BASH_ENV \
+    OIDC_TOKEN_ISSUED_AT || true
 
 # --- cortex: local binary does not curl ---
 cat > "$TEST_ROOT/bin/curl" << 'EOF'

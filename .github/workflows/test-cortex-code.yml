@@ -170,6 +170,27 @@ jobs:
           test ! -f "${HOME}/.snowflake/connections.toml"
           echo "PASS: skip path"
 
+      - name: "Test: write connection when OIDC is configured and no token is saved"
+        shell: bash
+        run: |
+          set -e
+          HOME=$(mktemp -d)
+          export HOME
+          unset SNOWFLAKE_TOKEN
+          export SF_CICD_AUTH_TYPE="oidc"
+          export SNOWFLAKE_ACCOUNT="test-account"
+          export SNOWFLAKE_USER="test-user"
+          export CONNECTION_NAME="default"
+          python3 cortex-code/scripts/setup-connection.py
+          test -f "${HOME}/.snowflake/connections.toml"
+          grep -q '\[default\]' "${HOME}/.snowflake/connections.toml"
+          grep -q 'WORKLOAD_IDENTITY' "${HOME}/.snowflake/connections.toml"
+          if grep -q 'token' "${HOME}/.snowflake/connections.toml"; then
+            echo "FAIL: token must not be written to connections.toml"
+            exit 1
+          fi
+          echo "PASS: oidc auth type without a saved token"
+
       - name: "Test: write connection when token is set"
         shell: bash
         run: |
@@ -321,6 +342,10 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
           echo "$OUTPUT"
           echo "$OUTPUT" | grep -q "id-token: write"
           echo "PASS: missing-endpoint path"
+
+      - name: Run offline OIDC and install tests
+        shell: bash
+        run: bash tests/iso-offline.test.sh
 
   unit-test-cortex-release:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

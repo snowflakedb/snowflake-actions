@@ -8,8 +8,9 @@
 # workload-identity connection.
 #
 # Env:
-#   OIDC_TOKEN_NAME           Name of the env var to export the token as
-#                             (default SNOWFLAKE_TOKEN).
+#   OIDC_TOKEN_NAME           Env var later bash steps export the token into
+#                             (default SNOWFLAKE_TOKEN). A value already set
+#                             is left unchanged.
 #   OIDC_AUDIENCE             Explicit oidc-audience input. Empty means omitted.
 #   SNOWFLAKE_AUDIENCE        Audience already set on the job. Used when
 #                             OIDC_AUDIENCE is empty. Exported before minting
@@ -25,8 +26,9 @@ source "${SCRIPT_DIR}/oidc-audience.sh"
 resolve_oidc_audience
 export SNOWFLAKE_AUDIENCE="$AUDIENCE"
 
-# Mint (or reuse) and mask the GitHub OIDC token, exporting it under
-# OIDC_TOKEN_NAME and recording SF_CICD_AUTH_TYPE.
+# Prove the GitHub OIDC endpoint is reachable. The minted token is masked and
+# dropped. Later bash steps mint a new token in the background every 4 minutes.
+# A token the job already put in OIDC_TOKEN_NAME is left unchanged.
 bash "${SCRIPT_DIR}/oidc-token.sh"
 
 {
