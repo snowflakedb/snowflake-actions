@@ -30,7 +30,8 @@
 #           with:
 #             target: DCM_STAGE
 #             project-path: Quickstarts/DCM_Project_Quickstart_1/
-#             snowflake-user: ${{ env.SNOWFLAKE_USER }}
+#
+#   snowflake-user is optional. Leave it unset for OIDC workload identity.
 #
 # Example usage (with drop detection and PR comment):
 #
@@ -38,7 +39,6 @@
 #     with:
 #       target: DCM_STAGE
 #       project-path: Quickstarts/DCM_Project_Quickstart_1/
-#       snowflake-user: ${{ env.SNOWFLAKE_USER }}
 #       allow-drops: "false"
 #       comment-on-pr: "true"
 #
@@ -67,8 +67,12 @@ inputs:
     description: "Path to the DCM project directory (containing manifest.yml). Deploy copies this directory to a temporary folder and runs from that copy."
     required: true
   snowflake-user:
-    description: "Snowflake username for OIDC authentication"
-    required: true
+    description: >-
+      Snowflake LOGIN_NAME to send with the connection. Leave unset for OIDC
+      workload identity. A service user often has a NAME and no LOGIN_NAME, and
+      sending either value fails the login.
+    required: false
+    default: ""
   cli-artifact:
     description: >-
       Path to a local Snowflake CLI wheel, sdist, or directory of wheels.
@@ -198,6 +202,7 @@ runs:
         PR_BRANCH: ${{ steps.pr_branch.outputs.branch }}
       run: |
         . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_apply_snowflake_user
 
         ALIAS_ARG=(--alias "$(dcm_deployment_alias "$PR_BRANCH")")
 
@@ -224,6 +229,9 @@ runs:
         TARGET: ${{ inputs.target }}
         SCRIPTS_DIR: ${{ inputs.post-scripts-path }}
       run: |
+        . "$GITHUB_ACTION_PATH/../../scripts/dcm-lib.sh"
+        dcm_apply_snowflake_user
+
         MANIFEST_PATH="manifest.yml"
 
         if [ ! -d "$SCRIPTS_DIR" ]; then
