@@ -1,0 +1,26 @@
+name: "test-suite (weekly)"
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  test-01:
+    uses: ./.github/workflows/test-01-basic-install.yml
+  test-02:
+    uses: ./.github/workflows/test-02-cli-version.yml
+  test-03:
+    uses: ./.github/workflows/test-03-custom-github-ref.yml
+  test-04:
+    uses: ./.github/workflows/test-04-mutual-exclusion.yml
+  test-05:
+    uses: ./.github/workflows/test-05-oidc.yml
+    secrets: inherit
+  test-06:
+    uses: ./.github/workflows/test-06-keypair-temp.yml
+    secrets: inherit
+  test-07:
+    uses: ./.github/workflows/test-07-keypair-named.yml
+    secrets: inherit
+  test-08:
+    uses: ./.github/workflows/test-08-config-absent.yml
