@@ -595,3 +595,14 @@ jobs:
           });
           JS
           node "$HARNESS"
+
+  unit-test-snowflake-user:
+    name: Unit test optional snowflake-user
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: omit SNOWFLAKE_USER unless a login name was provided"
+        run: bash tests/dcm-snowflake-user.test.sh
