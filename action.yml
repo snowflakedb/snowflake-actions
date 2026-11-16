@@ -91,16 +91,17 @@ inputs:
 
   # --- Shared authentication options -------------------------------------
   use-oidc:
-    description: "Enable OIDC authentication"
+    description: "Enable OIDC authentication. Bash steps export a new token every 4 minutes. Other shells do not; snow mints when that variable is empty (CLI 3.33). Cortex and other callers do not mint. The token is not written to a file."
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Name of the token environment variable for OIDC authentication. By default it is set for
-      temporary connections
-      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
-      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
+      Environment variable bash steps export the OIDC token into. Default
+      SNOWFLAKE_TOKEN, which snow reads for every connection. Set
+      SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to supply only that named connection
+      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection).
+      A value already set in the step is left unchanged.
     required: false
     default: "SNOWFLAKE_TOKEN"
 
