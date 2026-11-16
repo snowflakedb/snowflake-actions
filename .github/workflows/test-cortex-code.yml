@@ -322,6 +322,10 @@ print(b64(b"{\"alg\":\"none\"}") + "." + b64(payload) + ".sig")
           echo "$OUTPUT" | grep -q "id-token: write"
           echo "PASS: missing-endpoint path"
 
+      - name: Run offline OIDC and install tests
+        shell: bash
+        run: bash tests/iso-offline.test.sh
+
   unit-test-cortex-release:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Unit test cortex release install

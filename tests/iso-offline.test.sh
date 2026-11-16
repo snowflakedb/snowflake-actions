@@ -380,9 +380,9 @@ grep -q 'SNOWFLAKE_AUDIENCE=' "$GITHUB_ENV" \
     && fail "oidc-token: mismatch wrote SNOWFLAKE_AUDIENCE"
 echo "PASS: oidc-token refuses to reuse a token minted for another audience"
 
-# configure-snowflake-oidc writes the same audience it minted with.
-# A pre-set token makes oidc-token.sh return before curling; the configure
-# script must still publish the override for later steps.
+# configure-snowflake-oidc publishes the audience and does not export a token.
+# A pre-set SNOWFLAKE_TOKEN is left for the CLI to reuse; it is not copied
+# into GITHUB_ENV, and the script does not mint.
 GITHUB_ENV="$TEST_ROOT/configure.env"
 : > "$GITHUB_ENV"
 SNOWFLAKE_TOKEN="$(jwt_with_aud "iso.example")" \
@@ -392,9 +392,49 @@ GITHUB_ENV="$GITHUB_ENV" \
     || fail "configure: override audience should succeed"
 grep -qx 'SNOWFLAKE_AUDIENCE=iso.example' "$GITHUB_ENV" \
     || fail "configure: did not publish the override audience"
+grep -qx 'SNOWFLAKE_AUTHENTICATOR=WORKLOAD_IDENTITY' "$GITHUB_ENV" \
+    || fail "configure: did not publish the authenticator"
+grep -qx 'SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER=OIDC' "$GITHUB_ENV" \
+    || fail "configure: did not publish the workload identity provider"
+grep -qx 'SF_CICD_AUTH_TYPE=oidc' "$GITHUB_ENV" \
+    || fail "configure: did not record SF_CICD_AUTH_TYPE"
+grep -q '^SNOWFLAKE_TOKEN=' "$GITHUB_ENV" \
+    && fail "configure: copied a pre-set token into GITHUB_ENV"
 grep -qx 'SNOWFLAKE_AUDIENCE=snowflakecomputing.com' "$GITHUB_ENV" \
     && fail "configure: hardcoded commercial audience overwrote the override"
-echo "PASS: configure-snowflake-oidc publishes the override audience"
+echo "PASS: configure-snowflake-oidc publishes the override audience and no token"
+
+# No pre-set token: still do not mint. The CLI mints on each command.
+CURL_LOG="$TEST_ROOT/configure-no-mint.log"
+: > "$CURL_LOG"
+GITHUB_ENV="$TEST_ROOT/configure-no-mint.env"
+: > "$GITHUB_ENV"
+unset SNOWFLAKE_TOKEN || true
+ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/token" \
+ACTIONS_ID_TOKEN_REQUEST_TOKEN="request-token" \
+SNOWFLAKE_AUDIENCE="iso.example" \
+CURL_LOG="$CURL_LOG" \
+GITHUB_ENV="$GITHUB_ENV" \
+    bash "$REPO_ROOT/scripts/configure-snowflake-oidc.sh" \
+    || fail "configure: should succeed without minting"
+[ ! -s "$CURL_LOG" ] || fail "configure: minted a token"
+grep -q '^SNOWFLAKE_TOKEN=' "$GITHUB_ENV" \
+    && fail "configure: exported a token"
+grep -qx 'SNOWFLAKE_AUDIENCE=iso.example' "$GITHUB_ENV" \
+    || fail "configure: no-token path did not publish the audience"
+echo "PASS: configure-snowflake-oidc does not export a token"
+
+set +e
+unset SNOWFLAKE_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+SNOWFLAKE_AUDIENCE="iso.example" \
+GITHUB_ENV="$TEST_ROOT/configure-no-endpoint.env" \
+    bash "$REPO_ROOT/scripts/configure-snowflake-oidc.sh" >"$TEST_ROOT/configure-no-endpoint.out" 2>&1
+no_ep_rc=$?
+set -e
+[ "$no_ep_rc" -ne 0 ] || fail "configure: missing endpoint should fail"
+grep -q 'id-token: write' "$TEST_ROOT/configure-no-endpoint.out" \
+    || fail "configure: missing-endpoint error did not name id-token: write"
+echo "PASS: configure-snowflake-oidc requires the OIDC endpoint when snow will mint"
 
 # --- cortex: local binary does not curl ---
 cat > "$TEST_ROOT/bin/curl" << 'EOF'

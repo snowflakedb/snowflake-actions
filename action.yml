@@ -91,16 +91,20 @@ inputs:
 
   # --- Shared authentication options -------------------------------------
   use-oidc:
-    description: "Enable OIDC authentication"
+    description: >-
+      Enable OIDC authentication. The Snowflake CLI mints a token on each
+      command and this action does not export one. Cortex Code does not mint;
+      that path still exports the token.
     required: false
     default: "false"
 
   oidc-token-name:
     description: >-
-      Name of the token environment variable for OIDC authentication. By default it is set for
-      temporary connections
-      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection);
-      change it to SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to work with named connections.
+      Env var the Cortex Code path exports the OIDC token into. Default
+      SNOWFLAKE_TOKEN. Set SNOWFLAKE_CONNECTIONS_<NAME>_TOKEN to supply only
+      that named connection
+      (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection).
+      The Snowflake CLI path ignores this input and does not export a token.
     required: false
     default: "SNOWFLAKE_TOKEN"
 
@@ -178,7 +182,6 @@ runs:
       if: ${{ inputs.snowflake-cli == 'true' && inputs.use-oidc == 'true' }}
       shell: bash
       env:
-        OIDC_TOKEN_NAME: ${{ inputs.oidc-token-name }}
         OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
       run: bash $GITHUB_ACTION_PATH/scripts/configure-snowflake-oidc.sh
 
