@@ -273,6 +273,10 @@ runs:
 
           if [ $EXIT_CODE -ne 0 ]; then
             FAIL_COUNT=$((FAIL_COUNT + 1))
+            echo "::error::Post-script ${FILENAME} failed (exit code ${EXIT_CODE})"
+            echo "::group::Output of ${FILENAME}"
+            echo "$SQL_OUTPUT"
+            echo "::endgroup::"
             {
               echo "### ❌ Post-script \`$FILENAME\` failed"
               echo '```'
