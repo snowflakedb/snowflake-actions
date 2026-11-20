@@ -34,11 +34,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Replace GitHub expressions with a placeholder before `bash -n`. The
+          # pattern is built from parts so this file never contains a literal
+          # expression opener, which GitHub would try to evaluate.
+          open='$''{''{'
           for f in app/*/action.yml; do
             n=$(yq eval '[.runs.steps[] | select(.run)] | length' "$f")
             for i in $(seq 0 $((n - 1))); do
               yq eval "[.runs.steps[] | select(.run)][$i].run" "$f" \
-                | sed 's/\${{[^}]*}}/X/g' > /tmp/block.sh
+                | OPEN="$open" perl -pe 's/\Q$ENV{OPEN}\E[^}]*\}\}/X/g' > /tmp/block.sh
               bash -n /tmp/block.sh || { echo "::error file=$f::run block $i doesn't parse"; exit 1; }
             done
           done
