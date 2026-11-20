@@ -1,0 +1,106 @@
+# Snowflake App Runtime Preflight Action
+#
+# Checks a serverless app before any upload or build: the manifest is app.yml
+# v2, the target is serverless, an existing service is serverless too (a managed
+# service can't be converted), and the url_prefix isn't taken by another
+# service. A deploy only finds a prefix collision after upload and build.
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#
+# Example:
+#
+#   - uses: actions/checkout@v7
+#   - uses: snowflakedb/snowflake-actions/app/preflight@v3
+#     with:
+#       target: prod
+
+name: "Snowflake App Runtime Preflight"
+description: "Check a serverless Snowflake App Runtime app before deploying it."
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target name from app.yml. Empty uses default_target, or the top level when there are no targets."
+    required: false
+    default: ""
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+outputs:
+  service:
+    description: "Fully qualified Application Service name."
+    value: ${{ steps.check.outputs.service }}
+  exists:
+    description: "'true' when the service already exists."
+    value: ${{ steps.check.outputs.exists }}
+  live-version:
+    description: "Version the existing service runs, for example VERSION$4. Empty for a new service."
+    value: ${{ steps.check.outputs.live_version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Check app
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET_INPUT: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_check_manifest "$TARGET"
+
+        SERVICE="$(app_service_fqn "$TARGET")"
+        echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+        if [[ "$SERVICE" == USER\$* ]]; then
+          gha_summary_line "⚠️ \`$SERVICE\` is in a personal database. Other roles can't be granted access, and a CI service user may not have one."
+        fi
+
+        snow app validate ${TARGET:+--target "$TARGET"} -x
+
+        COMPUTE="$(app_describe_field "$SERVICE" compute_resource)"
+        if [ -z "$COMPUTE" ]; then
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "live_version=" >> "$GITHUB_OUTPUT"
+          gha_summary_line "### ✅ Preflight passed: \`$SERVICE\` will be created on serverless compute"
+        elif [ "$COMPUTE" != "SERVERLESS" ]; then
+          gha_summary_line "### ❌ \`$SERVICE\` already exists on $COMPUTE"
+          gha_summary_line "An existing service keeps its compute type. Give the serverless target a new name."
+          exit 1
+        else
+          LIVE="$(app_live_version "$SERVICE")"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
+          gha_summary_line "### ✅ Preflight passed: \`$SERVICE\` runs \`$LIVE\`"
+        fi
+
+        PREFIX="$(app_field "$TARGET" url_prefix)"
+        if [ -n "$PREFIX" ]; then
+          OWNER="$(snow sql -x --format JSON -q "SHOW APPLICATION SERVICES IN ACCOUNT" 2>/dev/null \
+            | P="$PREFIX" jq -r '.[] | select((.url // "") | startswith(env.P + "-apps.")) | "\(.database_name).\(.schema_name).\(.name)"' | head -1)"
+          if [ -n "$OWNER" ] && [ "$OWNER" != "$SERVICE" ]; then
+            gha_summary_line "### ❌ url_prefix \`$PREFIX\` is already used by \`$OWNER\`"
+            exit 1
+          fi
+        fi

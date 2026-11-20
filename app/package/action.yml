@@ -1,0 +1,93 @@
+# Snowflake App Runtime Package Action
+#
+# Uploads the project and builds a new immutable package version of a
+# serverless app without changing the running service. Pass the `version`
+# output to app/promote to deploy exactly this build to each target.
+#
+# The CLI doesn't report the version a build creates, so this action reads the
+# newest version back from the artifact repository. Serialize builds of the
+# same app with a concurrency group so two builds can't race:
+#
+#   concurrency:
+#     group: sar-build-${{ github.repository }}-my-app
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#
+# Example:
+#
+#   - uses: snowflakedb/snowflake-actions/app/package@v3
+#     id: build
+#     with:
+#       target: stage
+
+name: "Snowflake App Runtime Package"
+description: "Build a new version of a serverless Snowflake App Runtime app without deploying it."
+branding:
+  icon: "package"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target name from app.yml. Empty uses default_target, or the top level when there are no targets."
+    required: false
+    default: ""
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: "Package version this build created, for example VERSION$5."
+    value: ${{ steps.build.outputs.version }}
+  repository:
+    description: "Fully qualified artifact repository."
+    value: ${{ steps.build.outputs.repository }}
+  package:
+    description: "Package name in the artifact repository."
+    value: ${{ steps.build.outputs.package }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Upload and build
+      id: build
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET_INPUT: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_check_manifest "$TARGET"
+        IFS=$'\t' read -r REPO PACKAGE < <(app_repo_and_package "$TARGET")
+        echo "repository=$REPO" >> "$GITHUB_OUTPUT"
+        echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+
+        BEFORE="$(app_latest_version "$REPO" "$PACKAGE" || true)"
+        app_run_deploy "Upload" --upload-only ${TARGET:+--target "$TARGET"}
+        app_run_deploy "Build" --build-only ${TARGET:+--target "$TARGET"}
+        AFTER="$(app_latest_version "$REPO" "$PACKAGE")"
+
+        if [ -z "$AFTER" ] || [ "$AFTER" = "$BEFORE" ]; then
+          gha_summary_line "### ❌ The build finished but no new version appeared in \`$REPO\`"
+          exit 1
+        fi
+        echo "version=$AFTER" >> "$GITHUB_OUTPUT"
+        gha_summary_line "Built \`$PACKAGE\` \`$AFTER\` in \`$REPO\`."

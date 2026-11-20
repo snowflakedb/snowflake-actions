@@ -1,0 +1,145 @@
+# Snowflake App Runtime Promote Action
+#
+# Deploys a built version of a serverless app to a target and reports the
+# version that ends up live. Serverless deploys wait up to one minute for the
+# health check; a version that fails it is rolled back by Snowflake, and this
+# action then fails with reverted=true.
+#
+# With `version` set, the action deploys exactly that version:
+#   - When it is the newest version, it runs `snow app deploy --promote-only`,
+#     which also applies the manifest's service settings.
+#   - When newer versions exist, it runs ALTER APPLICATION SERVICE ...
+#     UPGRADE TO VERSION on the existing service. That path changes only the
+#     code version, not service settings such as environment variables.
+# Without `version`, `--promote-only` deploys the newest version (LATEST).
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#
+# Example (build once, promote the same version to stage then prod):
+#
+#   - uses: snowflakedb/snowflake-actions/app/promote@v3
+#     with:
+#       target: prod
+#       version: ${{ needs.build.outputs.version }}
+
+name: "Snowflake App Runtime Promote"
+description: "Deploy a built version of a serverless Snowflake App Runtime app and report what is live."
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target name from app.yml. Empty uses default_target, or the top level when there are no targets."
+    required: false
+    default: ""
+  version:
+    description: "Version to deploy, for example VERSION$5 from app/package. Empty deploys the newest version."
+    required: false
+    default: ""
+  comment-on-pr:
+    description: "Post the result as a comment on the associated pull request."
+    required: false
+    default: "false"
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+outputs:
+  url:
+    description: "App URL."
+    value: ${{ steps.promote.outputs.url }}
+  live-version:
+    description: "Version the service runs after this step."
+    value: ${{ steps.promote.outputs.live_version }}
+  reverted:
+    description: "'true' when the new version failed its health check and the previous version stayed live."
+    value: ${{ steps.promote.outputs.reverted }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Promote
+      id: promote
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET_INPUT: ${{ inputs.target }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+        echo "GHA_SUMMARY_FILE=${RUNNER_TEMP}/sar-promote-summary.md" >> "$GITHUB_ENV"
+        export GHA_SUMMARY_FILE="${RUNNER_TEMP}/sar-promote-summary.md"
+        : > "$GHA_SUMMARY_FILE"
+
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_check_manifest "$TARGET"
+        SERVICE="$(app_service_fqn "$TARGET")"
+        IFS=$'\t' read -r REPO PACKAGE < <(app_repo_and_package "$TARGET")
+        if [ -n "$VERSION" ] && ! [[ "$VERSION" =~ ^VERSION\$[0-9]+$ ]]; then
+          gha_summary_line "### ❌ version must look like VERSION\$<n> (got '$VERSION')"
+          exit 1
+        fi
+
+        BEFORE="$(app_live_version "$SERVICE" || true)"
+        LATEST="$(app_latest_version "$REPO" "$PACKAGE")"
+        CODE=0
+        if [ -z "$VERSION" ] || [ "$VERSION" = "$LATEST" ]; then
+          app_run_deploy "Deploy ${VERSION:-$LATEST} to ${TARGET:-default}" --promote-only ${TARGET:+--target "$TARGET"} || CODE=$?
+          WANT="$LATEST"
+        elif [ -z "$BEFORE" ]; then
+          gha_summary_line "### ❌ \`$SERVICE\` doesn't exist yet, and \`$VERSION\` isn't the newest version"
+          gha_summary_line "The CLI can only create a service from the newest version. Promote the newest version first, or rebuild."
+          exit 1
+        else
+          gha_summary_line "Pinning \`$VERSION\` (newest is \`$LATEST\`). Service settings are not reapplied on this path."
+          OUT="${RUNNER_TEMP}/sar-upgrade.out"
+          snow sql -x -q "ALTER APPLICATION SERVICE $SERVICE UPGRADE TO VERSION $VERSION" > "$OUT" 2>&1 || CODE=$?
+          if [ "$CODE" -eq 0 ]; then
+            gha_emit_summary success "Upgrade to $VERSION" "$OUT"
+          else
+            gha_emit_summary failure "Upgrade to $VERSION" "$OUT"
+          fi
+          WANT="$VERSION"
+        fi
+
+        LIVE="$(app_live_version "$SERVICE" || true)"
+        URL="$(snow app open --print-only ${TARGET:+--target "$TARGET"} -x 2>/dev/null || true)"
+        echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
+        echo "url=$URL" >> "$GITHUB_OUTPUT"
+        if [ "$CODE" -ne 0 ] && [ -n "$LIVE" ] && [ "$LIVE" != "$WANT" ]; then
+          echo "reverted=true" >> "$GITHUB_OUTPUT"
+          gha_summary_line "### ↩️ \`$SERVICE\` stayed on \`$LIVE\` (wanted \`$WANT\`)"
+        else
+          echo "reverted=false" >> "$GITHUB_OUTPUT"
+        fi
+        if [ "$CODE" -eq 0 ]; then
+          gha_summary_line "**Live:** \`$LIVE\` at $URL"
+        fi
+        exit "$CODE"
+
+    - name: Comment on PR
+      if: always() && inputs.comment-on-pr == 'true'
+      uses: actions/github-script@v8
+      env:
+        MARKER: sar-promote:${{ inputs.target }}
+      with:
+        script: |
+          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postSummaryComment(github, context, process.env.GHA_SUMMARY_FILE, 'Could not read promote summary.', process.env.MARKER);
