@@ -32,6 +32,14 @@ A serverless deploy waits up to one minute for the app to pass its
 
 Rerunning the failed job won't help. The failed build is still the newest version, so a rerun deploys it again. Fix the app and push, or promote a known-good version.
 
+### Recovering after a revert
+
+A known issue ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)) affects serverless apps today. After a failed health check, Snowflake keeps the previous version but leaves the app stopped, and requests return `503 app not available` instead of starting it. In testing, the app stayed offline for at least 13 minutes and didn't recover on its own.
+
+`app/promote` works around it by default. When its deploy fails the health check and the app is left stopped on the previous version, it runs `DISABLE` and then `ENABLE`, and waits for the app to run again. That takes about 10 seconds. The step still fails, the summary says the previous version was restarted, and the `recovered` output is `true`. This needs `OPERATE` on the service, which a role that can deploy already has.
+
+To turn it off, set `recover-after-revert: "false"`. If recovery is off or fails, the summary shows the two statements to run by hand.
+
 After a failed deploy, `app/promote` tries once to add the app's recent logs from the event table to the step summary. A serverless app that failed its health check is stopped, so live logs aren't available, and reading the event table needs a role with access to the account event table: `MONITOR` on the app isn't enough. Without that access, the summary says the logs couldn't be read, and the CLI error line is the only diagnostic.
 
 ## Build once, promote the same version

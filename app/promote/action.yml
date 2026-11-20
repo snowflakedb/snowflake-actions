@@ -53,6 +53,14 @@ inputs:
     description: "Post the result as a comment on the associated pull request."
     required: false
     default: "false"
+  recover-after-revert:
+    description: >-
+      Work around SNOW-4580129. When the new version fails its health check,
+      Snowflake keeps the previous version but can leave the app stopped so that
+      requests return 503. With 'true', the action then runs DISABLE and ENABLE
+      to bring the previous version back (needs OPERATE). The step still fails.
+    required: false
+    default: "true"
   oidc-audience:
     description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
     required: false
@@ -68,6 +76,9 @@ outputs:
   reverted:
     description: "'true' when the new version failed its health check and the previous version stayed live."
     value: ${{ steps.promote.outputs.reverted }}
+  recovered:
+    description: "'true' when the action restarted the previous version after a revert (see recover-after-revert)."
+    value: ${{ steps.promote.outputs.recovered }}
 
 runs:
   using: "composite"
@@ -85,6 +96,7 @@ runs:
       env:
         TARGET_INPUT: ${{ inputs.target }}
         VERSION: ${{ inputs.version }}
+        RECOVER: ${{ inputs.recover-after-revert }}
       run: |
         set -euo pipefail
         . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
@@ -137,6 +149,25 @@ runs:
         else
           echo "reverted=false" >> "$GITHUB_OUTPUT"
         fi
+        RECOVERED=false
+        if [ "$CODE" -ne 0 ] && [ "$RECOVER" = "true" ]; then
+          case "$(app_recover_after_revert "$SERVICE" "$WANT")" in
+            recovered)
+              RECOVERED=true
+              gha_summary_line "### 🔁 Restarted \`$LIVE\` after the revert"
+              gha_summary_line "Snowflake left the previous version stopped, so requests would have returned 503 ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)). The action ran DISABLE and ENABLE, and the app is running again. This step still fails because the new version didn't deploy."
+              ;;
+            failed)
+              gha_summary_line "### ⚠️ The app may be offline"
+              gha_summary_line "The previous version is stopped and couldn't be restarted ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)). Run these with a role that has OPERATE on the service:"
+              gha_summary_line '```sql'
+              gha_summary_line "ALTER APPLICATION SERVICE $SERVICE DISABLE;"
+              gha_summary_line "ALTER APPLICATION SERVICE $SERVICE ENABLE;"
+              gha_summary_line '```'
+              ;;
+          esac
+        fi
+        echo "recovered=$RECOVERED" >> "$GITHUB_OUTPUT"
         if [ "$CODE" -eq 0 ]; then
           gha_summary_line "**Live:** \`$LIVE\` at $URL"
         else

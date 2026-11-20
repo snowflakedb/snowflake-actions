@@ -224,6 +224,49 @@ app_summarize_failure_logs() {
   gha_summary_line "Couldn't read the failed version's logs: the role can't read the account event table. Grant it read access to the event table, or check the app's logs in Snowsight."
 }
 
+# Work around SNOW-4580129: when a serverless deploy fails its health check,
+# Snowflake reverts the service to the previous version but leaves it SUSPENDED
+# with no instances, and requests return 503 "app not available" instead of
+# starting it. DISABLE then ENABLE brings the previous version back.
+#
+# Only acts when the deploy this step ran failed its health check and the
+# service is stopped on a version other than the one it tried to deploy; a
+# healthy idle app looks the same, so the status alone is not enough. Needs
+# OPERATE on the service. Prints "recovered", "not-needed" or "failed".
+# Usage: app_recover_after_revert <service-fqn> <wanted-version>
+app_recover_after_revert() {
+  local service="$1" want="$2"
+  local err="${RUNNER_TEMP:-/tmp}/sar-app-deploy.err"
+  if ! grep -q -e '094547' -e 'did not become healthy' "$err" 2>/dev/null; then
+    echo not-needed
+    return 0
+  fi
+  local row status instances live
+  row="$(snow sql -x --format JSON -q "DESCRIBE APPLICATION SERVICE $service" 2>/dev/null)" || { echo failed; return 0; }
+  status="$(jq -r '.[0].status // empty' <<< "$row")"
+  instances="$(jq -r '.[0].current_instances // empty' <<< "$row")"
+  live="$(jq -r '.[0].source // empty' <<< "$row" | jq -r '.version // empty' 2>/dev/null)"
+  if [ "$status" != "SUSPENDED" ] || [ "$instances" != "0" ] || [ -z "$live" ] || [ "$live" = "$want" ]; then
+    echo not-needed
+    return 0
+  fi
+
+  if ! snow sql -x -q "ALTER APPLICATION SERVICE $service DISABLE" > /dev/null 2>&1 \
+    || ! snow sql -x -q "ALTER APPLICATION SERVICE $service ENABLE" > /dev/null 2>&1; then
+    echo failed
+    return 0
+  fi
+  local i
+  for i in $(seq 1 "${APP_RECOVER_POLLS:-24}"); do
+    if [ "$(app_describe_field "$service" status)" = "RUNNING" ]; then
+      echo recovered
+      return 0
+    fi
+    sleep "${APP_RECOVER_POLL_SECS:-5}"
+  done
+  echo failed
+}
+
 # Copy the project to a scratch directory so manifest edits never touch the
 # checkout. Prints the destination.
 # Usage: app_copy_project <project-path>

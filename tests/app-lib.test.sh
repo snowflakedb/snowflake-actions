@@ -94,4 +94,38 @@ SNOW_OUT='Schema does not exist or not authorized' SNOW_CODE=1 app_summarize_fai
 grep -q "can't read the account event table" "$GITHUB_STEP_SUMMARY" || fail "a permission error should name the missing access"
 unset -f snow
 
+# app_recover_after_revert: stub `snow` with a service that is stopped until
+# ENABLE runs. ALTER_FAILS=1 makes the ALTER statements fail.
+STATE="$ROOT/state"
+snow() {
+  local q="${*}"
+  case "$q" in
+    *"DESCRIBE APPLICATION SERVICE"*)
+      if [ -f "$STATE.enabled" ]; then
+        printf '[{"status":"RUNNING","current_instances":1,"source":"{\\"version\\":\\"VERSION$1\\"}"}]'
+      else
+        printf '[{"status":"%s","current_instances":%s,"source":"{\\"version\\":\\"VERSION$1\\"}"}]' "$DESC_STATUS" "$DESC_INSTANCES"
+      fi ;;
+    *DISABLE*) [ -z "${ALTER_FAILS:-}" ] ;;
+    *ENABLE*) [ -z "${ALTER_FAILS:-}" ] && touch "$STATE.enabled" ;;
+  esac
+}
+export APP_RECOVER_POLLS=2 APP_RECOVER_POLL_SECS=0
+ERR="$RUNNER_TEMP/sar-app-deploy.err"
+
+rm -f "$STATE.enabled"; echo "some other deploy error" > "$ERR"
+eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "not-needed" "no health-check failure, no recovery"
+
+echo "094547 (55000): app did not become healthy within 1m0s" > "$ERR"
+eq "$(DESC_STATUS=RUNNING DESC_INSTANCES=1 app_recover_after_revert D.S.APP 'VERSION$2')" "not-needed" "a running app needs no recovery"
+eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$1')" "not-needed" "the wanted version being live isn't a revert"
+[ ! -f "$STATE.enabled" ] || fail "no ALTER should run when recovery isn't needed"
+
+eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "recovered" "a stopped reverted app is restarted"
+[ -f "$STATE.enabled" ] || fail "recovery should run ENABLE"
+
+rm -f "$STATE.enabled"
+eq "$(ALTER_FAILS=1 DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "failed" "a failed ALTER is reported"
+unset -f snow
+
 echo "PASS: app-lib"
