@@ -32,6 +32,8 @@ A serverless deploy waits up to one minute for the app to pass its
 
 Rerunning the failed job won't help. The failed build is still the newest version, so a rerun deploys it again. Fix the app and push, or promote a known-good version.
 
+The failed version's startup logs aren't available to CI today. Live logs need a running version, and the event-table routes failed in testing for a role without read access on the account event table. The CLI error line is the only diagnostic the summary can show.
+
 ## Build once, promote the same version
 
 The CLI always deploys the newest version, so a build that lands between your stage and prod deploys could reach prod untested. `app/package` records the version it created, and `app/promote` deploys exactly that version. Use a `concurrency` group so two builds of the same app can't overlap.
@@ -93,7 +95,12 @@ jobs:
 
 This assumes `stage` and `prod` share one artifact repository (set the same `artifact_repo` and `package_name` on both targets). Otherwise prod has no copy of the stage build.
 
-When `version` isn't the newest version, `app/promote` runs `ALTER APPLICATION SERVICE ... UPGRADE TO VERSION`. That changes only the code version. Service settings from `app.yml`, such as environment variables and integrations, aren't reapplied on that path.
+When `version` is set, `app/promote` checks whether the installed Snowflake CLI supports `snow app deploy --promote-only --version` (added in [snowflake-cli#681](https://github.com/snowflake-eng/snowflake-cli/pull/681), not yet released):
+
+- **Supported:** it promotes that exact version through the CLI. Service settings from `app.yml` are applied, and this also works when the service doesn't exist yet.
+- **Older CLI:** the newest version goes through `--promote-only`. An older version goes through `ALTER APPLICATION SERVICE ... UPGRADE TO VERSION`, which changes only the code version and can't create a service. Service settings such as environment variables and integrations aren't reapplied on that path.
+
+`app/package` reads the version from the build's JSON output when the CLI reports it, and otherwise from the artifact repository.
 
 ## Pull request previews
 
@@ -147,5 +154,5 @@ Each PR gets the service `<NAME>_PR_<number>` with URL prefix `<prefix>-pr-<numb
 
 - Managed compute pool apps and `snowflake.yml` projects aren't supported.
 - Event-table metrics and lifecycle events aren't available for serverless apps, so there's no post-deploy health report beyond the health check.
-- `app/package` finds the new version by reading the artifact repository after the build, because the CLI doesn't report it.
+- With a CLI older than snowflake-cli#681, `app/package` finds the new version by reading the artifact repository after the build.
 - The first serverless deploy in an account can wait up to three hours for a TLS certificate.

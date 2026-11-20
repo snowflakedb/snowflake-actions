@@ -6,11 +6,15 @@
 # action then fails with reverted=true.
 #
 # With `version` set, the action deploys exactly that version:
-#   - When it is the newest version, it runs `snow app deploy --promote-only`,
-#     which also applies the manifest's service settings.
-#   - When newer versions exist, it runs ALTER APPLICATION SERVICE ...
-#     UPGRADE TO VERSION on the existing service. That path changes only the
-#     code version, not service settings such as environment variables.
+#   - With a CLI that has snowflake-eng/snowflake-cli#681, it runs
+#     `snow app deploy --promote-only --version <v>`. That applies the
+#     manifest's service settings and also works for a service that doesn't
+#     exist yet.
+#   - With an older CLI, the newest version goes through `--promote-only`, and
+#     an older version goes through ALTER APPLICATION SERVICE ... UPGRADE TO
+#     VERSION on the existing service. That path changes only the code
+#     version, not service settings such as environment variables, and it
+#     can't create a service.
 # Without `version`, `--promote-only` deploys the newest version (LATEST).
 #
 # The calling workflow MUST set:
@@ -100,12 +104,15 @@ runs:
         BEFORE="$(app_live_version "$SERVICE" || true)"
         LATEST="$(app_latest_version "$REPO" "$PACKAGE")"
         CODE=0
-        if [ -z "$VERSION" ] || [ "$VERSION" = "$LATEST" ]; then
+        if [ -n "$VERSION" ] && app_cli_supports_version; then
+          app_run_deploy "Deploy $VERSION to ${TARGET:-default}" --promote-only --version "$VERSION" ${TARGET:+--target "$TARGET"} || CODE=$?
+          WANT="$VERSION"
+        elif [ -z "$VERSION" ] || [ "$VERSION" = "$LATEST" ]; then
           app_run_deploy "Deploy ${VERSION:-$LATEST} to ${TARGET:-default}" --promote-only ${TARGET:+--target "$TARGET"} || CODE=$?
           WANT="$LATEST"
         elif [ -z "$BEFORE" ]; then
           gha_summary_line "### ❌ \`$SERVICE\` doesn't exist yet, and \`$VERSION\` isn't the newest version"
-          gha_summary_line "The CLI can only create a service from the newest version. Promote the newest version first, or rebuild."
+          gha_summary_line "This CLI can only create a service from the newest version. Use a Snowflake CLI that supports \`--promote-only --version\`, promote the newest version first, or rebuild."
           exit 1
         else
           gha_summary_line "Pinning \`$VERSION\` (newest is \`$LATEST\`). Service settings are not reapplied on this path."
@@ -120,7 +127,8 @@ runs:
         fi
 
         LIVE="$(app_live_version "$SERVICE" || true)"
-        URL="$(snow app open --print-only ${TARGET:+--target "$TARGET"} -x 2>/dev/null || true)"
+        URL="$(app_deploy_json_field url)"
+        [ -n "$URL" ] || URL="$(snow app open --print-only ${TARGET:+--target "$TARGET"} -x 2>/dev/null || true)"
         echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
         echo "url=$URL" >> "$GITHUB_OUTPUT"
         if [ "$CODE" -ne 0 ] && [ -n "$LIVE" ] && [ "$LIVE" != "$WANT" ]; then

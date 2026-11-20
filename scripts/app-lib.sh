@@ -176,6 +176,23 @@ app_run_deploy() {
   return "$code"
 }
 
+# Print a field from the JSON the last app_run_deploy printed, or nothing.
+# CLIs with snowflake-eng/snowflake-cli#681 add version, live_version and url;
+# older ones print only {"message": ...}.
+# Usage: app_deploy_json_field <field>
+app_deploy_json_field() {
+  local out="${RUNNER_TEMP:-/tmp}/sar-app-deploy.out"
+  [ -s "$out" ] || return 0
+  F="$1" jq -r '.[env.F] // empty' "$out" 2>/dev/null || true
+}
+
+# Succeed when this CLI accepts `snow app deploy --promote-only --version`
+# (snowflake-eng/snowflake-cli#681). The flag is hidden from --help, so probe it:
+# an older CLI rejects the unknown option with exit code 2.
+app_cli_supports_version() {
+  snow app deploy --promote-only --version 'VERSION$1' --help > /dev/null 2>&1
+}
+
 # Copy the project to a scratch directory so manifest edits never touch the
 # checkout. Prints the destination.
 # Usage: app_copy_project <project-path>

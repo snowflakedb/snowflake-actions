@@ -4,9 +4,10 @@
 # serverless app without changing the running service. Pass the `version`
 # output to app/promote to deploy exactly this build to each target.
 #
-# The CLI doesn't report the version a build creates, so this action reads the
-# newest version back from the artifact repository. Serialize builds of the
-# same app with a concurrency group so two builds can't race:
+# A CLI with snowflake-eng/snowflake-cli#681 reports the version in the build's
+# JSON output. With an older CLI, this action reads the newest version back from
+# the artifact repository instead. Either way, serialize builds of the same app
+# with a concurrency group so two builds can't race:
 #
 #   concurrency:
 #     group: sar-build-${{ github.repository }}-my-app
@@ -83,7 +84,10 @@ runs:
         BEFORE="$(app_latest_version "$REPO" "$PACKAGE" || true)"
         app_run_deploy "Upload" --upload-only ${TARGET:+--target "$TARGET"}
         app_run_deploy "Build" --build-only ${TARGET:+--target "$TARGET"}
-        AFTER="$(app_latest_version "$REPO" "$PACKAGE")"
+        AFTER="$(app_deploy_json_field version)"
+        if [ -z "$AFTER" ]; then
+          AFTER="$(app_latest_version "$REPO" "$PACKAGE")"
+        fi
 
         if [ -z "$AFTER" ] || [ "$AFTER" = "$BEFORE" ]; then
           gha_summary_line "### ❌ The build finished but no new version appeared in \`$REPO\`"
