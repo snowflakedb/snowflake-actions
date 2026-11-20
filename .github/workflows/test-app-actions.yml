@@ -1,0 +1,48 @@
+name: Test — App Runtime actions
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "scripts/app-lib.sh"
+      - "scripts/gh-actions-lib.sh"
+      - "tests/app-lib.test.sh"
+      - ".github/workflows/test-app-actions.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "scripts/app-lib.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-test-app-lib:
+    name: Unit test app-lib.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "Test: target resolution, serverless check, preview rewrite"
+        run: bash tests/app-lib.test.sh
+
+      - name: "Test: run blocks parse"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Replace GitHub expressions with a placeholder before `bash -n`. The
+          # pattern is built from parts so this file never contains a literal
+          # expression opener, which GitHub would try to evaluate.
+          open='$''{''{'
+          for f in app/*/action.yml; do
+            n=$(yq eval '[.runs.steps[] | select(.run)] | length' "$f")
+            for i in $(seq 0 $((n - 1))); do
+              yq eval "[.runs.steps[] | select(.run)][$i].run" "$f" \
+                | OPEN="$open" perl -pe 's/\Q$ENV{OPEN}\E[^}]*\}\}/X/g' > /tmp/block.sh
+              bash -n /tmp/block.sh || { echo "::error file=$f::run block $i doesn't parse"; exit 1; }
+            done
+          done
