@@ -32,7 +32,7 @@ A serverless deploy waits up to one minute for the app to pass its
 
 Rerunning the failed job won't help. The failed build is still the newest version, so a rerun deploys it again. Fix the app and push, or promote a known-good version.
 
-The failed version's startup logs aren't available to CI today. Live logs need a running version, and the event-table routes failed in testing for a role without read access on the account event table. The CLI error line is the only diagnostic the summary can show.
+After a failed deploy, `app/promote` tries once to add the app's recent logs from the event table to the step summary. A serverless app that failed its health check is stopped, so live logs aren't available, and reading the event table needs a role with access to the account event table: `MONITOR` on the app isn't enough. Without that access, the summary says the logs couldn't be read, and the CLI error line is the only diagnostic.
 
 ## Build once, promote the same version
 

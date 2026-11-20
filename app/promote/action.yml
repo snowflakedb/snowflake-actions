@@ -139,6 +139,8 @@ runs:
         fi
         if [ "$CODE" -eq 0 ]; then
           gha_summary_line "**Live:** \`$LIVE\` at $URL"
+        else
+          app_summarize_failure_logs "$SERVICE"
         fi
         exit "$CODE"
 

@@ -193,6 +193,37 @@ app_cli_supports_version() {
   snow app deploy --promote-only --version 'VERSION$1' --help > /dev/null 2>&1
 }
 
+# After a failed deploy, try once to add the app's recent logs to the summary.
+# A serverless app that failed its health check is stopped, so live logs aren't
+# available; the event table is the only source, and reading it needs access to
+# the account event table, not just MONITOR on the app. When that read fails,
+# say so instead of failing the step.
+# Usage: app_summarize_failure_logs <service-fqn>
+app_summarize_failure_logs() {
+  local service="$1"
+  local quoted="${service//\'/\'\'}"
+  local out="${RUNNER_TEMP:-/tmp}/sar-app-failure-logs.txt"
+  if snow sql -x --format JSON \
+      -q "SELECT SYSTEM\$GET_APPLICATION_SERVICE_EVENT_TABLE_DATA('${quoted}', 'LOG') AS LOGS" \
+      > "$out" 2>&1; then
+    jq -r '.[0].LOGS // empty' "$out" 2>/dev/null \
+      | jq -r '.[]? | (.VALUE // .value // .) | tostring' 2>/dev/null \
+      | tail -n 60 > "${out}.lines" || true
+    if [ -s "${out}.lines" ]; then
+      gha_summary_line "<details><summary>Recent app logs from the event table (last 60 lines)</summary>"
+      gha_summary_line ""
+      gha_summary_line '```'
+      while IFS= read -r line; do gha_summary_output_line "$line"; done < "${out}.lines"
+      gha_summary_line '```'
+      gha_summary_line "</details>"
+      return 0
+    fi
+    gha_summary_line "No log rows for \`${service}\` in the event table yet. Event table rows can take a few minutes to arrive."
+    return 0
+  fi
+  gha_summary_line "Couldn't read the failed version's logs: the role can't read the account event table. Grant it read access to the event table, or check the app's logs in Snowsight."
+}
+
 # Copy the project to a scratch directory so manifest edits never touch the
 # checkout. Prints the destination.
 # Usage: app_copy_project <project-path>

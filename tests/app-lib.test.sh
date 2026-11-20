@@ -73,4 +73,25 @@ printf 'version: 2\nname: My_App\ndatabase: D\nschema: S\ncompute_resource: SERV
 APP_MANIFEST=noprefix.yml app_apply_preview "" 7 D S
 eq "$(APP_MANIFEST=noprefix.yml app_field "" url_prefix)" "my-app-pr-7" "prefix derived from the name"
 
+# app_summarize_failure_logs: stub `snow` to return each kind of answer.
+export RUNNER_TEMP="$ROOT/rt"
+mkdir -p "$RUNNER_TEMP"
+snow() { printf '%s' "$SNOW_OUT"; return "${SNOW_CODE:-0}"; }
+
+: > "$GITHUB_STEP_SUMMARY"
+SNOW_OUT='[{"LOGS": "[{\"VALUE\": \"Traceback: boom\"}, {\"VALUE\": \"sh: python: not found\"}]"}]' \
+  app_summarize_failure_logs "D.S.APP"
+grep -q "sh: python: not found" "$GITHUB_STEP_SUMMARY" || fail "log lines should reach the summary"
+grep -q "<details>" "$GITHUB_STEP_SUMMARY" || fail "logs should be collapsed"
+
+: > "$GITHUB_STEP_SUMMARY"
+SNOW_OUT='[{"LOGS": "[]"}]' app_summarize_failure_logs "D.S.APP"
+grep -q "No log rows" "$GITHUB_STEP_SUMMARY" || fail "an empty result should say there are no rows yet"
+
+: > "$GITHUB_STEP_SUMMARY"
+SNOW_OUT='Schema does not exist or not authorized' SNOW_CODE=1 app_summarize_failure_logs "D.S.APP" \
+  || fail "a permission error must not fail the step"
+grep -q "can't read the account event table" "$GITHUB_STEP_SUMMARY" || fail "a permission error should name the missing access"
+unset -f snow
+
 echo "PASS: app-lib"
