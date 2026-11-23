@@ -113,6 +113,15 @@ snow() {
 export APP_RECOVER_POLLS=2 APP_RECOVER_POLL_SECS=0
 ERR="$RUNNER_TEMP/sar-app-deploy.err"
 
+# app_failed_health_check reads the CLI error, so it doesn't depend on which
+# version DESCRIBE reports after the failure.
+echo "some other deploy error" > "$ERR"
+! app_failed_health_check || fail "an unrelated deploy error isn't a failed health check"
+echo "094547 (55000): app did not become healthy within 1m0s" > "$ERR"
+app_failed_health_check || fail "094547 is a failed health check"
+rm -f "$ERR"
+! app_failed_health_check || fail "no error file means no failed health check"
+
 rm -f "$STATE.enabled"; echo "some other deploy error" > "$ERR"
 eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "not-needed" "no health-check failure, no recovery"
 

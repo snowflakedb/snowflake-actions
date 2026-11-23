@@ -25,18 +25,20 @@ Authentication uses OIDC through the root action, the same as the [DCM actions](
 
 A serverless deploy waits up to one minute for the app to pass its
 [`health_check`](https://docs.snowflake.com/en/developer-guide/snowflake-app-runtime/app-yml#label-snowflake-app-runtime-app-yml-serverless-health-check)
-(default `/`). If the new version doesn't pass in time, Snowflake keeps the previous version and the step fails. `app/promote` then:
+(default `/`). If the new version doesn't pass in time, the deploy fails and the new version doesn't take effect. Snowflake doesn't restart the previous version: the app stays offline until a deploy passes its health check. `app/promote` then:
 
 - puts the CLI's error in the step summary, for example `app did not become healthy within 1m0s (probe=readiness path=/ port=8080)`;
-- sets `reverted` to `true` and `live-version` to the version that stayed live.
+- sets `reverted` to `true`. It reads this from the CLI's error, not from `DESCRIBE APPLICATION SERVICE`, which reports the previous version after such a failure today ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)).
 
 Rerunning the failed job won't help. The failed build is still the newest version, so a rerun deploys it again. Fix the app and push, or promote a known-good version.
 
-### Recovering after a revert
+### Recovering after a failed health check
 
-A known issue ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)) affects serverless apps today. After a failed health check, Snowflake keeps the previous version but leaves the app stopped, and requests return `503 app not available` instead of starting it. In testing, the app stayed offline for at least 13 minutes and didn't recover on its own.
+After a failed health check, the app is left stopped, and requests return `503 app not available` instead of starting it. Snowflake engineering confirmed this is intended: the app stays offline until the next successful deploy. In testing, it stayed offline for at least 13 minutes.
 
-`app/promote` works around it by default. When its deploy fails the health check and the app is left stopped on the previous version, it runs `DISABLE` and then `ENABLE`, and waits for the app to run again. That takes about 10 seconds. The step still fails, the summary says the previous version was restarted, and the `recovered` output is `true`. This needs `OPERATE` on the service, which a role that can deploy already has.
+To bring it back, deploy a fixed version, or promote the last version that passed. With a Snowflake CLI that supports `--promote-only --version` ([snowflake-cli#681](https://github.com/snowflake-eng/snowflake-cli/pull/681)), `snow app deploy --promote-only --version <previous>` restarted the app in about 17 seconds. `ALTER APPLICATION SERVICE ... UPGRADE TO VERSION <previous>` doesn't work in this state: Snowflake reports the service is already at that version.
+
+`app/promote` works around this by default. When its deploy fails the health check and the app is left stopped, with `DESCRIBE` reporting the previous version, it runs `DISABLE` and then `ENABLE`, and waits for the app to run again. That takes about 10 seconds. The step still fails, the summary says the previous version was restarted, and the `recovered` output is `true`. This needs `OPERATE` on the service, which a role that can deploy already has. It depends on how Snowflake records the service after the failure ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)): if `DESCRIBE` reports the failed version, the action skips this step rather than restart the failed build.
 
 To turn it off, set `recover-after-revert: "false"`. If recovery is off or fails, the summary shows the two statements to run by hand.
 

@@ -224,20 +224,31 @@ app_summarize_failure_logs() {
   gha_summary_line "Couldn't read the failed version's logs: the role can't read the account event table. Grant it read access to the event table, or check the app's logs in Snowsight."
 }
 
+# True when the last app_run_deploy failed because the new version didn't pass
+# its health check in time (error 094547). Read from the CLI's error output, not
+# from DESCRIBE, which reports the previous version after such a failure
+# (SNOW-4580129) and may report the failed one once that is fixed.
+# Usage: app_failed_health_check
+app_failed_health_check() {
+  grep -q -e '094547' -e 'did not become healthy' "${RUNNER_TEMP:-/tmp}/sar-app-deploy.err" 2>/dev/null
+}
+
 # Work around SNOW-4580129: when a serverless deploy fails its health check,
-# Snowflake reverts the service to the previous version but leaves it SUSPENDED
-# with no instances, and requests return 503 "app not available" instead of
-# starting it. DISABLE then ENABLE brings the previous version back.
+# the new version doesn't take effect and the app is left SUSPENDED with no
+# instances. Requests return 503 "app not available" instead of starting it,
+# and DESCRIBE still reports the previous version. DISABLE then ENABLE starts
+# that previous version again.
 #
 # Only acts when the deploy this step ran failed its health check and the
 # service is stopped on a version other than the one it tried to deploy; a
-# healthy idle app looks the same, so the status alone is not enough. Needs
-# OPERATE on the service. Prints "recovered", "not-needed" or "failed".
+# healthy idle app looks the same, so the status alone is not enough. If
+# DESCRIBE reports the failed version, ENABLE would start the failed build, so
+# it does nothing. Needs OPERATE on the service. Prints "recovered",
+# "not-needed" or "failed".
 # Usage: app_recover_after_revert <service-fqn> <wanted-version>
 app_recover_after_revert() {
   local service="$1" want="$2"
-  local err="${RUNNER_TEMP:-/tmp}/sar-app-deploy.err"
-  if ! grep -q -e '094547' -e 'did not become healthy' "$err" 2>/dev/null; then
+  if ! app_failed_health_check; then
     echo not-needed
     return 0
   fi

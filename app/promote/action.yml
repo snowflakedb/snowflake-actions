@@ -2,8 +2,9 @@
 #
 # Deploys a built version of a serverless app to a target and reports the
 # version that ends up live. Serverless deploys wait up to one minute for the
-# health check; a version that fails it is rolled back by Snowflake, and this
-# action then fails with reverted=true.
+# health check; a version that fails it doesn't take effect, Snowflake leaves
+# the app offline until a deploy passes, and this action fails with
+# reverted=true.
 #
 # With `version` set, the action deploys exactly that version:
 #   - With a CLI that has snowflake-eng/snowflake-cli#681, it runs
@@ -56,9 +57,9 @@ inputs:
   recover-after-revert:
     description: >-
       Work around SNOW-4580129. When the new version fails its health check,
-      Snowflake keeps the previous version but can leave the app stopped so that
-      requests return 503. With 'true', the action then runs DISABLE and ENABLE
-      to bring the previous version back (needs OPERATE). The step still fails.
+      the app is left stopped and requests return 503 until a deploy passes.
+      With 'true', the action then runs DISABLE and ENABLE to start the
+      previous version again (needs OPERATE). The step still fails.
     required: false
     default: "true"
   oidc-audience:
@@ -71,13 +72,13 @@ outputs:
     description: "App URL."
     value: ${{ steps.promote.outputs.url }}
   live-version:
-    description: "Version the service runs after this step."
+    description: "Version DESCRIBE APPLICATION SERVICE reports after this step. After a failed health check this is the previous version today (SNOW-4580129)."
     value: ${{ steps.promote.outputs.live_version }}
   reverted:
-    description: "'true' when the new version failed its health check and the previous version stayed live."
+    description: "'true' when the new version failed its health check and didn't take effect. Snowflake leaves the app offline until a deploy passes, unless recover-after-revert restarts it."
     value: ${{ steps.promote.outputs.reverted }}
   recovered:
-    description: "'true' when the action restarted the previous version after a revert (see recover-after-revert)."
+    description: "'true' when the action restarted the previous version after a failed health check (see recover-after-revert)."
     value: ${{ steps.promote.outputs.recovered }}
 
 runs:
@@ -130,6 +131,7 @@ runs:
           gha_summary_line "Pinning \`$VERSION\` (newest is \`$LATEST\`). Service settings are not reapplied on this path."
           OUT="${RUNNER_TEMP}/sar-upgrade.out"
           snow sql -x -q "ALTER APPLICATION SERVICE $SERVICE UPGRADE TO VERSION $VERSION" > "$OUT" 2>&1 || CODE=$?
+          cp "$OUT" "${RUNNER_TEMP}/sar-app-deploy.err"
           if [ "$CODE" -eq 0 ]; then
             gha_emit_summary success "Upgrade to $VERSION" "$OUT"
           else
@@ -143,9 +145,13 @@ runs:
         [ -n "$URL" ] || URL="$(snow app open --print-only ${TARGET:+--target "$TARGET"} -x 2>/dev/null || true)"
         echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
         echo "url=$URL" >> "$GITHUB_OUTPUT"
-        if [ "$CODE" -ne 0 ] && [ -n "$LIVE" ] && [ "$LIVE" != "$WANT" ]; then
+        # A failed health check is read from the error, not from DESCRIBE, which
+        # reports the previous version today (SNOW-4580129).
+        if [ "$CODE" -ne 0 ] && app_failed_health_check; then
           echo "reverted=true" >> "$GITHUB_OUTPUT"
-          gha_summary_line "### ↩️ \`$SERVICE\` stayed on \`$LIVE\` (wanted \`$WANT\`)"
+          gha_summary_line "### ↩️ \`$WANT\` failed its health check and didn't take effect"
+          gha_summary_line "Snowflake leaves the app offline until a deploy passes its health check. Fix the app and deploy again, or promote a version that passed."
+          [ -z "$BEFORE" ] || gha_summary_line "Before this deploy, \`$SERVICE\` was on \`$BEFORE\`."
         else
           echo "reverted=false" >> "$GITHUB_OUTPUT"
         fi
@@ -154,7 +160,7 @@ runs:
           case "$(app_recover_after_revert "$SERVICE" "$WANT")" in
             recovered)
               RECOVERED=true
-              gha_summary_line "### 🔁 Restarted \`$LIVE\` after the revert"
+              gha_summary_line "### 🔁 Restarted \`$LIVE\` after the failed health check"
               gha_summary_line "Snowflake left the previous version stopped, so requests would have returned 503 ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)). The action ran DISABLE and ENABLE, and the app is running again. This step still fails because the new version didn't deploy."
               ;;
             failed)
