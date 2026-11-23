@@ -320,7 +320,7 @@ runs:
 
     - name: Upload result artifact
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
       with:
         name: dcm-connection-${{ inputs.target }}-${{ env.DCM_PROJECT_SLUG }}
         path: /tmp/dcm-results/dcm-connection-${{ inputs.target }}.txt
