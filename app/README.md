@@ -28,7 +28,7 @@ A serverless deploy waits up to one minute for the app to pass its
 (default `/`). If the new version doesn't pass in time, the deploy fails and the new version doesn't take effect. Snowflake doesn't restart the previous version: the app stays offline until a deploy passes its health check. `app/promote` then:
 
 - puts the CLI's error in the step summary, for example `app did not become healthy within 1m0s (probe=readiness path=/ port=8080)`;
-- sets `reverted` to `true`. It reads this from the CLI's error, not from `DESCRIBE APPLICATION SERVICE`, which reports the previous version after such a failure today ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)).
+- sets `reverted` to `true`. It reads this from the CLI's error, not from `DESCRIBE APPLICATION SERVICE`. DESCRIBE still reports the previous version, because Snowflake records a version only once it deploys.
 
 Rerunning the failed job won't help. The failed build is still the newest version, so a rerun deploys it again. Fix the app and push, or promote a known-good version.
 
@@ -38,9 +38,14 @@ After a failed health check, the app is left stopped, and requests return `503 a
 
 To bring it back, deploy a fixed version, or promote the last version that passed. With a Snowflake CLI that supports `--promote-only --version` ([snowflake-cli#681](https://github.com/snowflake-eng/snowflake-cli/pull/681)), `snow app deploy --promote-only --version <previous>` restarted the app in about 17 seconds. `ALTER APPLICATION SERVICE ... UPGRADE TO VERSION <previous>` doesn't work in this state: Snowflake reports the service is already at that version.
 
-`app/promote` works around this by default. When its deploy fails the health check and the app is left stopped, with `DESCRIBE` reporting the previous version, it runs `DISABLE` and then `ENABLE`, and waits for the app to run again. That takes about 10 seconds. The step still fails, the summary says the previous version was restarted, and the `recovered` output is `true`. This needs `OPERATE` on the service, which a role that can deploy already has. It depends on how Snowflake records the service after the failure ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)): if `DESCRIBE` reports the failed version, the action skips this step rather than restart the failed build.
+`app/promote` does this by default, so a bad build doesn't leave the app offline. When its deploy fails the health check and `DESCRIBE` still reports the version from before the deploy, it starts that version again:
 
-To turn it off, set `recover-after-revert: "false"`. If recovery is off or fails, the summary shows the two statements to run by hand.
+- With a CLI that supports `--promote-only --version`, it runs `snow app deploy --promote-only --version <previous>`. `CREATE OR ALTER` re-applies the whole service, which clears the failed state.
+- Otherwise it runs `DISABLE` and then `ENABLE`, which recreates the app from the version Snowflake has recorded, and waits for it to run. That takes about 10 seconds and needs `OPERATE` on the service, which a role that can deploy already has.
+
+The step still fails, the summary says which version is serving, and the `recovered` output is `true`. The check doesn't depend on DESCRIBE's `status`, which reads `SUSPENDED` or `UPGRADE_FAILED` depending on the Snowflake release.
+
+To leave the app offline instead, set `recover-after-revert: "false"`. Do that when a new version changes data before it passes its health check, for example by running a migration on startup, and the previous version can't run against the changed data. If recovery is off or fails, the summary shows the commands to run by hand.
 
 After a failed deploy, `app/promote` tries once to add the app's recent logs from the event table to the step summary. A serverless app that failed its health check is stopped, so live logs aren't available, and reading the event table needs a role with access to the account event table: `MONITOR` on the app isn't enough. Without that access, the summary says the logs couldn't be read, and the CLI error line is the only diagnostic.
 

@@ -170,7 +170,7 @@ app_run_deploy() {
   else
     gha_emit_summary failure "$header" "${out}.all"
     if grep -q 'did not become healthy' "$err"; then
-      gha_summary_line "The new version failed its health check, so Snowflake kept the previous version. A rerun deploys the same build again; fix the app or pin a known-good version with app/promote."
+      gha_summary_line "The new version failed its health check and didn't take effect. A rerun deploys the same build again; fix the app or pin a known-good version with app/promote."
     fi
   fi
   return "$code"
@@ -226,39 +226,49 @@ app_summarize_failure_logs() {
 
 # True when the last app_run_deploy failed because the new version didn't pass
 # its health check in time (error 094547). Read from the CLI's error output, not
-# from DESCRIBE, which reports the previous version after such a failure
-# (SNOW-4580129) and may report the failed one once that is fixed.
+# from DESCRIBE, which still reports the previous version after such a failure.
 # Usage: app_failed_health_check
 app_failed_health_check() {
   grep -q -e '094547' -e 'did not become healthy' "${RUNNER_TEMP:-/tmp}/sar-app-deploy.err" 2>/dev/null
 }
 
-# Work around SNOW-4580129: when a serverless deploy fails its health check,
-# the new version doesn't take effect and the app is left SUSPENDED with no
-# instances. Requests return 503 "app not available" instead of starting it,
-# and DESCRIBE still reports the previous version. DISABLE then ENABLE starts
-# that previous version again.
+# After a failed health check, start the version that was serving before the
+# deploy again. Snowflake leaves the app offline until a deploy passes: the
+# orchestrator marks it UPGRADE_FAILED and refuses to start it on request, so
+# requests return 503 "app not available". GS records a new version only after
+# a successful deploy, so DESCRIBE still reports the previous one, and
+# ALTER ... UPGRADE TO VERSION <previous> is a no-op.
 #
-# Only acts when the deploy this step ran failed its health check and the
-# service is stopped on a version other than the one it tried to deploy; a
-# healthy idle app looks the same, so the status alone is not enough. If
-# DESCRIBE reports the failed version, ENABLE would start the failed build, so
-# it does nothing. Needs OPERATE on the service. Prints "recovered",
-# "not-needed" or "failed".
-# Usage: app_recover_after_revert <service-fqn> <wanted-version>
+# Acts only when the deploy this step ran failed its health check and DESCRIBE
+# still reports <before>, the version from before the deploy. It doesn't read
+# DESCRIBE's status, which reads SUSPENDED or UPGRADE_FAILED depending on the
+# release. With a CLI that has --promote-only --version, it deploys <before>
+# again: CREATE OR ALTER re-applies the whole service. Otherwise it runs
+# DISABLE, which deletes the app's orchestrator record, then ENABLE, which
+# recreates it from the recorded version (needs OPERATE).
+# Prints "recovered-cli", "recovered-sql", "not-needed" or "failed".
+# Usage: app_recover_after_revert <service-fqn> <wanted-version> <before-version> [target]
 app_recover_after_revert() {
-  local service="$1" want="$2"
-  if ! app_failed_health_check; then
+  local service="$1" want="$2" before="$3" target="${4:-}"
+  if ! app_failed_health_check || [ -z "$before" ] || [ "$before" = "$want" ]; then
     echo not-needed
     return 0
   fi
-  local row status instances live
-  row="$(snow sql -x --format JSON -q "DESCRIBE APPLICATION SERVICE $service" 2>/dev/null)" || { echo failed; return 0; }
-  status="$(jq -r '.[0].status // empty' <<< "$row")"
-  instances="$(jq -r '.[0].current_instances // empty' <<< "$row")"
-  live="$(jq -r '.[0].source // empty' <<< "$row" | jq -r '.version // empty' 2>/dev/null)"
-  if [ "$status" != "SUSPENDED" ] || [ "$instances" != "0" ] || [ -z "$live" ] || [ "$live" = "$want" ]; then
+  local live
+  live="$(app_live_version "$service" 2>/dev/null || true)"
+  if [ -z "$live" ] || [ "$live" != "$before" ]; then
     echo not-needed
+    return 0
+  fi
+
+  local tmp="${RUNNER_TEMP:-/tmp}/sar-app-recover"
+  if app_cli_supports_version; then
+    if snow app deploy --promote-only --version "$before" ${target:+--target "$target"} -x --format JSON \
+        > "$tmp.out" 2> "$tmp.err"; then
+      echo recovered-cli
+    else
+      echo failed
+    fi
     return 0
   fi
 
@@ -270,7 +280,7 @@ app_recover_after_revert() {
   local i
   for i in $(seq 1 "${APP_RECOVER_POLLS:-24}"); do
     if [ "$(app_describe_field "$service" status)" = "RUNNING" ]; then
-      echo recovered
+      echo recovered-sql
       return 0
     fi
     sleep "${APP_RECOVER_POLL_SECS:-5}"

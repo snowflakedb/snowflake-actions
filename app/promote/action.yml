@@ -56,10 +56,13 @@ inputs:
     default: "false"
   recover-after-revert:
     description: >-
-      Work around SNOW-4580129. When the new version fails its health check,
-      the app is left stopped and requests return 503 until a deploy passes.
-      With 'true', the action then runs DISABLE and ENABLE to start the
-      previous version again (needs OPERATE). The step still fails.
+      After a failed health check, Snowflake leaves the app offline (503) until
+      a deploy passes. With 'true', the action starts the version that was
+      serving before the deploy again: it redeploys that version with a CLI
+      that supports --promote-only --version, or else runs DISABLE and ENABLE
+      (needs OPERATE). The step still fails. Set 'false' to leave the app
+      offline, for example when a new version changes data before it passes
+      its health check.
     required: false
     default: "true"
   oidc-audience:
@@ -72,7 +75,7 @@ outputs:
     description: "App URL."
     value: ${{ steps.promote.outputs.url }}
   live-version:
-    description: "Version DESCRIBE APPLICATION SERVICE reports after this step. After a failed health check this is the previous version today (SNOW-4580129)."
+    description: "Version DESCRIBE APPLICATION SERVICE reports after this step. After a failed health check this is still the previous version, because Snowflake records a version only once it deploys."
     value: ${{ steps.promote.outputs.live_version }}
   reverted:
     description: "'true' when the new version failed its health check and didn't take effect. Snowflake leaves the app offline until a deploy passes, unless recover-after-revert restarts it."
@@ -146,7 +149,7 @@ runs:
         echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
         echo "url=$URL" >> "$GITHUB_OUTPUT"
         # A failed health check is read from the error, not from DESCRIBE, which
-        # reports the previous version today (SNOW-4580129).
+        # still reports the previous version after one.
         if [ "$CODE" -ne 0 ] && app_failed_health_check; then
           echo "reverted=true" >> "$GITHUB_OUTPUT"
           gha_summary_line "### ↩️ \`$WANT\` failed its health check and didn't take effect"
@@ -157,15 +160,23 @@ runs:
         fi
         RECOVERED=false
         if [ "$CODE" -ne 0 ] && [ "$RECOVER" = "true" ]; then
-          case "$(app_recover_after_revert "$SERVICE" "$WANT")" in
-            recovered)
+          case "$(app_recover_after_revert "$SERVICE" "$WANT" "$BEFORE" "$TARGET")" in
+            recovered-cli)
               RECOVERED=true
-              gha_summary_line "### 🔁 Restarted \`$LIVE\` after the failed health check"
-              gha_summary_line "Snowflake left the previous version stopped, so requests would have returned 503 ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)). The action ran DISABLE and ENABLE, and the app is running again. This step still fails because the new version didn't deploy."
+              gha_summary_line "### 🔁 Deployed \`$BEFORE\` again after the failed health check"
+              gha_summary_line "Snowflake leaves the app offline after a failed health check, so the action deployed the version that was serving before (\`snow app deploy --promote-only --version $BEFORE\`). The app is serving \`$BEFORE\` again. This step still fails because \`$WANT\` didn't deploy. To leave the app offline instead, set \`recover-after-revert: \"false\"\`."
+              ;;
+            recovered-sql)
+              RECOVERED=true
+              gha_summary_line "### 🔁 Restarted \`$BEFORE\` after the failed health check"
+              gha_summary_line "Snowflake leaves the app offline after a failed health check, so the action ran DISABLE and ENABLE, which start the version that was serving before. The app is serving \`$BEFORE\` again. This step still fails because \`$WANT\` didn't deploy. To leave the app offline instead, set \`recover-after-revert: \"false\"\`."
               ;;
             failed)
-              gha_summary_line "### ⚠️ The app may be offline"
-              gha_summary_line "The previous version is stopped and couldn't be restarted ([SNOW-4580129](https://snowflakecomputing.atlassian.net/browse/SNOW-4580129)). Run these with a role that has OPERATE on the service:"
+              gha_summary_line "### ⚠️ The app is offline"
+              gha_summary_line "The action couldn't start \`$BEFORE\` again. Deploy a fixed version, or bring the previous one back with either of these:"
+              gha_summary_line '```'
+              gha_summary_line "snow app deploy --promote-only --version $BEFORE${TARGET:+ --target $TARGET}"
+              gha_summary_line '```'
               gha_summary_line '```sql'
               gha_summary_line "ALTER APPLICATION SERVICE $SERVICE DISABLE;"
               gha_summary_line "ALTER APPLICATION SERVICE $SERVICE ENABLE;"

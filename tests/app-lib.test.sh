@@ -94,24 +94,28 @@ SNOW_OUT='Schema does not exist or not authorized' SNOW_CODE=1 app_summarize_fai
 grep -q "can't read the account event table" "$GITHUB_STEP_SUMMARY" || fail "a permission error should name the missing access"
 unset -f snow
 
-# app_recover_after_revert: stub `snow` with a service that is stopped until
-# ENABLE runs. ALTER_FAILS=1 makes the ALTER statements fail.
+# app_recover_after_revert: stub `snow`. DESCRIBE reports DESC_VERSION (default
+# VERSION$1) with status DESC_STATUS. CLI_VERSION=1 makes the CLI support
+# --promote-only --version; DEPLOY_FAILS=1 makes that redeploy fail;
+# ALTER_FAILS=1 makes DISABLE/ENABLE fail. Calls are logged to $STATE.calls.
 STATE="$ROOT/state"
 snow() {
   local q="${*}"
+  echo "$q" >> "$STATE.calls"
   case "$q" in
     *"DESCRIBE APPLICATION SERVICE"*)
-      if [ -f "$STATE.enabled" ]; then
-        printf '[{"status":"RUNNING","current_instances":1,"source":"{\\"version\\":\\"VERSION$1\\"}"}]'
-      else
-        printf '[{"status":"%s","current_instances":%s,"source":"{\\"version\\":\\"VERSION$1\\"}"}]' "$DESC_STATUS" "$DESC_INSTANCES"
-      fi ;;
+      local status="${DESC_STATUS:-SUSPENDED}"
+      [ -f "$STATE.enabled" ] && status=RUNNING
+      printf '[{"status":"%s","source":"{\\"version\\":\\"%s\\"}"}]' "$status" "${DESC_VERSION:-VERSION\$1}" ;;
+    *"--help"*) [ -n "${CLI_VERSION:-}" ] ;;
+    "app deploy"*) [ -z "${DEPLOY_FAILS:-}" ] ;;
     *DISABLE*) [ -z "${ALTER_FAILS:-}" ] ;;
     *ENABLE*) [ -z "${ALTER_FAILS:-}" ] && touch "$STATE.enabled" ;;
   esac
 }
 export APP_RECOVER_POLLS=2 APP_RECOVER_POLL_SECS=0
 ERR="$RUNNER_TEMP/sar-app-deploy.err"
+reset() { rm -f "$STATE.enabled" "$STATE.calls"; touch "$STATE.calls"; }
 
 # app_failed_health_check reads the CLI error, so it doesn't depend on which
 # version DESCRIBE reports after the failure.
@@ -122,19 +126,30 @@ app_failed_health_check || fail "094547 is a failed health check"
 rm -f "$ERR"
 ! app_failed_health_check || fail "no error file means no failed health check"
 
-rm -f "$STATE.enabled"; echo "some other deploy error" > "$ERR"
-eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "not-needed" "no health-check failure, no recovery"
+reset; echo "some other deploy error" > "$ERR"
+eq "$(app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1')" "not-needed" "no health-check failure, no recovery"
 
 echo "094547 (55000): app did not become healthy within 1m0s" > "$ERR"
-eq "$(DESC_STATUS=RUNNING DESC_INSTANCES=1 app_recover_after_revert D.S.APP 'VERSION$2')" "not-needed" "a running app needs no recovery"
-eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$1')" "not-needed" "the wanted version being live isn't a revert"
-[ ! -f "$STATE.enabled" ] || fail "no ALTER should run when recovery isn't needed"
+eq "$(app_recover_after_revert D.S.APP 'VERSION$2' '')" "not-needed" "a first deploy has nothing to go back to"
+eq "$(app_recover_after_revert D.S.APP 'VERSION$1' 'VERSION$1')" "not-needed" "redeploying the same version has nothing to go back to"
+eq "$(DESC_VERSION='VERSION$2' app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1')" "not-needed" "never restart the failed version"
+! grep -q -e DISABLE -e ENABLE -e "app deploy" "$STATE.calls" || fail "no recovery should run when it isn't needed"
 
-eq "$(DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "recovered" "a stopped reverted app is restarted"
-[ -f "$STATE.enabled" ] || fail "recovery should run ENABLE"
+for st in SUSPENDED UPGRADE_FAILED; do
+  reset
+  eq "$(DESC_STATUS=$st app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1')" "recovered-sql" "DISABLE/ENABLE recovers whatever the status ($st)"
+  [ -f "$STATE.enabled" ] || fail "recovery should run ENABLE ($st)"
+done
 
-rm -f "$STATE.enabled"
-eq "$(ALTER_FAILS=1 DESC_STATUS=SUSPENDED DESC_INSTANCES=0 app_recover_after_revert D.S.APP 'VERSION$2')" "failed" "a failed ALTER is reported"
+reset
+eq "$(CLI_VERSION=1 app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1' prod)" "recovered-cli" "a CLI with --version redeploys the previous version"
+grep -q -- 'app deploy --promote-only --version VERSION$1 --target prod' "$STATE.calls" || fail "the redeploy should pin the previous version and target"
+! grep -q -e DISABLE -e ENABLE "$STATE.calls" || fail "the CLI path shouldn't run DISABLE/ENABLE"
+eq "$(CLI_VERSION=1 DEPLOY_FAILS=1 app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1')" "failed" "a failed redeploy is reported"
+grep -q '094547' "$ERR" || fail "recovery must not overwrite the deploy's error output"
+
+reset
+eq "$(ALTER_FAILS=1 app_recover_after_revert D.S.APP 'VERSION$2' 'VERSION$1')" "failed" "a failed ALTER is reported"
 unset -f snow
 
 echo "PASS: app-lib"
