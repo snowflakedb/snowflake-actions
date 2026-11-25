@@ -1,0 +1,94 @@
+# Snowflake App Runtime Cleanup Action
+#
+# Removes a pull request's preview app: `snow app teardown` drops the service
+# and its code storage, then this action drops the artifact repository, which
+# keeps every build. Secrets, network rules, and integrations are never touched.
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#
+# Example:
+#
+#   on:
+#     pull_request:
+#       types: [closed]
+#   jobs:
+#     cleanup:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v7
+#         - uses: snowflakedb/snowflake-actions/app/cleanup@v3
+#           with:
+#             database: APPS
+#             schema: PREVIEWS
+
+name: "Snowflake App Runtime Cleanup"
+description: "Remove a pull request's preview Snowflake App Runtime app."
+branding:
+  icon: "trash-2"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target the preview was built from. Must match app/preview."
+    required: false
+    default: ""
+  database:
+    description: "Database for preview services. Must match app/preview."
+    required: true
+  schema:
+    description: "Schema for preview services. Must match app/preview."
+    required: true
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Remove preview
+      shell: bash
+      env:
+        PROJECT_PATH: ${{ inputs.project-path }}
+        TARGET_INPUT: ${{ inputs.target }}
+        PREVIEW_DATABASE: ${{ inputs.database }}
+        PREVIEW_SCHEMA: ${{ inputs.schema }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+        [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::app/cleanup runs only on pull_request events."; exit 1; }
+        IDENT='^[A-Za-z_][A-Za-z0-9_$]*$'
+        for v in "$PREVIEW_DATABASE" "$PREVIEW_SCHEMA"; do
+          [[ "$v" =~ $IDENT ]] || { echo "::error::Not a plain identifier: $v"; exit 1; }
+        done
+
+        DIR="$(app_copy_project "$PROJECT_PATH")"
+        cd "$DIR"
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_apply_preview "$TARGET" "$PR_NUMBER" "$PREVIEW_DATABASE" "$PREVIEW_SCHEMA"
+        SERVICE="$(app_service_fqn "")"
+        IFS=$'\t' read -r REPO _ < <(app_repo_and_package "")
+
+        if [ -z "$(app_describe_field "$SERVICE" name)" ]; then
+          gha_summary_line "No preview to remove: \`$SERVICE\` doesn't exist."
+          exit 0
+        fi
+        # Without --force, teardown waits for a confirmation prompt.
+        snow app teardown --force -x
+        snow sql -x -q "DROP ARTIFACT REPOSITORY IF EXISTS $REPO" > /dev/null
+        gha_summary_line "### 🧹 Removed \`$SERVICE\` and \`$REPO\`"

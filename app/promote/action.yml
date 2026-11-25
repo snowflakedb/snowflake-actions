@@ -1,0 +1,203 @@
+# Snowflake App Runtime Promote Action
+#
+# Deploys a built version of a serverless app to a target and reports the
+# version that ends up live. Serverless deploys wait up to one minute for the
+# health check; a version that fails it doesn't take effect, Snowflake leaves
+# the app offline until a deploy passes, and this action fails with
+# reverted=true.
+#
+# With `version` set, the action deploys exactly that version:
+#   - With a CLI that has snowflake-eng/snowflake-cli#681, it runs
+#     `snow app deploy --promote-only --version <v>`. That applies the
+#     manifest's service settings and also works for a service that doesn't
+#     exist yet.
+#   - With an older CLI, the newest version goes through `--promote-only`, and
+#     an older version goes through ALTER APPLICATION SERVICE ... UPGRADE TO
+#     VERSION on the existing service. That path changes only the code
+#     version, not service settings such as environment variables, and it
+#     can't create a service.
+# Without `version`, `--promote-only` deploys the newest version (LATEST).
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#
+# Example (build once, promote the same version to stage then prod):
+#
+#   - uses: snowflakedb/snowflake-actions/app/promote@v3
+#     with:
+#       target: prod
+#       version: ${{ needs.build.outputs.version }}
+
+name: "Snowflake App Runtime Promote"
+description: "Deploy a built version of a serverless Snowflake App Runtime app and report what is live."
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target name from app.yml. Empty uses default_target, or the top level when there are no targets."
+    required: false
+    default: ""
+  version:
+    description: "Version to deploy, for example VERSION$5 from app/package. Empty deploys the newest version."
+    required: false
+    default: ""
+  comment-on-pr:
+    description: "Post the result as a comment on the associated pull request."
+    required: false
+    default: "false"
+  recover-after-revert:
+    description: >-
+      After a failed health check, Snowflake leaves the app offline (503) until
+      a deploy passes. With 'true', the action starts the version that was
+      serving before the deploy again: it redeploys that version with a CLI
+      that supports --promote-only --version, or else runs DISABLE and ENABLE
+      (needs OPERATE). The step still fails. Set 'false' to leave the app
+      offline, for example when a new version changes data before it passes
+      its health check.
+    required: false
+    default: "true"
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+outputs:
+  url:
+    description: "App URL."
+    value: ${{ steps.promote.outputs.url }}
+  live-version:
+    description: "Version DESCRIBE APPLICATION SERVICE reports after this step. After a failed health check this is still the previous version, because Snowflake records a version only once it deploys."
+    value: ${{ steps.promote.outputs.live_version }}
+  reverted:
+    description: "'true' when the new version failed its health check and didn't take effect. Snowflake leaves the app offline until a deploy passes, unless recover-after-revert restarts it."
+    value: ${{ steps.promote.outputs.reverted }}
+  recovered:
+    description: "'true' when the action restarted the previous version after a failed health check (see recover-after-revert)."
+    value: ${{ steps.promote.outputs.recovered }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Promote
+      id: promote
+      shell: bash
+      working-directory: ${{ inputs.project-path }}
+      env:
+        TARGET_INPUT: ${{ inputs.target }}
+        VERSION: ${{ inputs.version }}
+        RECOVER: ${{ inputs.recover-after-revert }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+        echo "GHA_SUMMARY_FILE=${RUNNER_TEMP}/sar-promote-summary.md" >> "$GITHUB_ENV"
+        export GHA_SUMMARY_FILE="${RUNNER_TEMP}/sar-promote-summary.md"
+        : > "$GHA_SUMMARY_FILE"
+
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_check_manifest "$TARGET"
+        SERVICE="$(app_service_fqn "$TARGET")"
+        IFS=$'\t' read -r REPO PACKAGE < <(app_repo_and_package "$TARGET")
+        if [ -n "$VERSION" ] && ! [[ "$VERSION" =~ ^VERSION\$[0-9]+$ ]]; then
+          gha_summary_line "### ❌ version must look like VERSION\$<n> (got '$VERSION')"
+          exit 1
+        fi
+
+        BEFORE="$(app_live_version "$SERVICE" || true)"
+        LATEST="$(app_latest_version "$REPO" "$PACKAGE")"
+        CODE=0
+        if [ -n "$VERSION" ] && app_cli_supports_version; then
+          app_run_deploy "Deploy $VERSION to ${TARGET:-default}" --promote-only --version "$VERSION" ${TARGET:+--target "$TARGET"} || CODE=$?
+          WANT="$VERSION"
+        elif [ -z "$VERSION" ] || [ "$VERSION" = "$LATEST" ]; then
+          app_run_deploy "Deploy ${VERSION:-$LATEST} to ${TARGET:-default}" --promote-only ${TARGET:+--target "$TARGET"} || CODE=$?
+          WANT="$LATEST"
+        elif [ -z "$BEFORE" ]; then
+          gha_summary_line "### ❌ \`$SERVICE\` doesn't exist yet, and \`$VERSION\` isn't the newest version"
+          gha_summary_line "This CLI can only create a service from the newest version. Use a Snowflake CLI that supports \`--promote-only --version\`, promote the newest version first, or rebuild."
+          exit 1
+        else
+          gha_summary_line "Pinning \`$VERSION\` (newest is \`$LATEST\`). Service settings are not reapplied on this path."
+          OUT="${RUNNER_TEMP}/sar-upgrade.out"
+          snow sql -x -q "ALTER APPLICATION SERVICE $SERVICE UPGRADE TO VERSION $VERSION" > "$OUT" 2>&1 || CODE=$?
+          cp "$OUT" "${RUNNER_TEMP}/sar-app-deploy.err"
+          if [ "$CODE" -eq 0 ]; then
+            gha_emit_summary success "Upgrade to $VERSION" "$OUT"
+          else
+            gha_emit_summary failure "Upgrade to $VERSION" "$OUT"
+          fi
+          WANT="$VERSION"
+        fi
+
+        LIVE="$(app_live_version "$SERVICE" || true)"
+        URL="$(app_deploy_json_field url)"
+        [ -n "$URL" ] || URL="$(snow app open --print-only ${TARGET:+--target "$TARGET"} -x 2>/dev/null || true)"
+        echo "live_version=$LIVE" >> "$GITHUB_OUTPUT"
+        echo "url=$URL" >> "$GITHUB_OUTPUT"
+        # A failed health check is read from the error, not from DESCRIBE, which
+        # still reports the previous version after one.
+        if [ "$CODE" -ne 0 ] && app_failed_health_check; then
+          echo "reverted=true" >> "$GITHUB_OUTPUT"
+          gha_summary_line "### ↩️ \`$WANT\` failed its health check and didn't take effect"
+          gha_summary_line "Snowflake leaves the app offline until a deploy passes its health check. Fix the app and deploy again, or promote a version that passed."
+          [ -z "$BEFORE" ] || gha_summary_line "Before this deploy, \`$SERVICE\` was on \`$BEFORE\`."
+        else
+          echo "reverted=false" >> "$GITHUB_OUTPUT"
+        fi
+        RECOVERED=false
+        if [ "$CODE" -ne 0 ] && [ "$RECOVER" = "true" ]; then
+          case "$(app_recover_after_revert "$SERVICE" "$WANT" "$BEFORE" "$TARGET")" in
+            recovered-cli)
+              RECOVERED=true
+              gha_summary_line "### 🔁 Deployed \`$BEFORE\` again after the failed health check"
+              gha_summary_line "Snowflake leaves the app offline after a failed health check, so the action deployed the version that was serving before (\`snow app deploy --promote-only --version $BEFORE\`). The app is serving \`$BEFORE\` again. This step still fails because \`$WANT\` didn't deploy. To leave the app offline instead, set \`recover-after-revert: \"false\"\`."
+              ;;
+            recovered-sql)
+              RECOVERED=true
+              gha_summary_line "### 🔁 Restarted \`$BEFORE\` after the failed health check"
+              gha_summary_line "Snowflake leaves the app offline after a failed health check, so the action ran DISABLE and ENABLE, which start the version that was serving before. The app is serving \`$BEFORE\` again. This step still fails because \`$WANT\` didn't deploy. To leave the app offline instead, set \`recover-after-revert: \"false\"\`."
+              ;;
+            failed)
+              gha_summary_line "### ⚠️ The app is offline"
+              gha_summary_line "The action couldn't start \`$BEFORE\` again. Deploy a fixed version, or bring the previous one back with either of these:"
+              gha_summary_line '```'
+              gha_summary_line "snow app deploy --promote-only --version $BEFORE${TARGET:+ --target $TARGET}"
+              gha_summary_line '```'
+              gha_summary_line '```sql'
+              gha_summary_line "ALTER APPLICATION SERVICE $SERVICE DISABLE;"
+              gha_summary_line "ALTER APPLICATION SERVICE $SERVICE ENABLE;"
+              gha_summary_line '```'
+              ;;
+          esac
+        fi
+        echo "recovered=$RECOVERED" >> "$GITHUB_OUTPUT"
+        if [ "$CODE" -eq 0 ]; then
+          gha_summary_line "**Live:** \`$LIVE\` at $URL"
+        else
+          app_summarize_failure_logs "$SERVICE"
+        fi
+        exit "$CODE"
+
+    - name: Comment on PR
+      if: always() && inputs.comment-on-pr == 'true'
+      uses: actions/github-script@v8
+      env:
+        MARKER: sar-promote:${{ inputs.target }}
+      with:
+        script: |
+          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postSummaryComment(github, context, process.env.GHA_SUMMARY_FILE, 'Could not read promote summary.', process.env.MARKER);

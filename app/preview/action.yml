@@ -1,0 +1,134 @@
+# Snowflake App Runtime Preview Action
+#
+# Deploys a pull request to its own serverless app and comments the URL on the
+# PR. The service is <NAME>_PR_<number> and the URL prefix is
+# <prefix>-pr-<number>, in a shared schema you choose: apps in a personal
+# database (USER$) can't be shared with reviewers. Each preview is billed for
+# at least one idle hour after its last request. Pair it with app/cleanup on
+# pull_request: closed.
+#
+# The calling workflow MUST set:
+#
+#   permissions:
+#     id-token: write
+#     contents: read
+#     pull-requests: write
+#
+# Example:
+#
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, reopened]
+#   jobs:
+#     preview:
+#       runs-on: ubuntu-latest
+#       concurrency: sar-preview-${{ github.event.pull_request.number }}
+#       steps:
+#         - uses: actions/checkout@v7
+#         - uses: snowflakedb/snowflake-actions/app/preview@v3
+#           with:
+#             database: APPS
+#             schema: PREVIEWS
+#             reviewer-role: APP_REVIEWERS
+
+name: "Snowflake App Runtime Preview"
+description: "Deploy a pull request to its own serverless Snowflake App Runtime app."
+branding:
+  icon: "eye"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Directory that contains app.yml."
+    required: false
+    default: "."
+  target:
+    description: "Target whose settings the preview starts from. Empty uses default_target, or the top level."
+    required: false
+    default: ""
+  database:
+    description: "Database for preview services. Must not be USER$."
+    required: true
+  schema:
+    description: "Schema for preview services."
+    required: true
+  reviewer-role:
+    description: "Role granted USAGE on the preview so reviewers can open it. Empty skips the grant."
+    required: false
+    default: ""
+  oidc-audience:
+    description: "Audience (aud) claim for the GitHub OIDC token. Forwarded to the Snowflake CLI setup step."
+    required: false
+    default: ""
+
+outputs:
+  url:
+    description: "Preview URL."
+    value: ${{ steps.deploy.outputs.url }}
+  service:
+    description: "Fully qualified preview service name."
+    value: ${{ steps.deploy.outputs.service }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Snowflake CLI
+      uses: snowflakedb/snowflake-actions@v3
+      with:
+        use-oidc: true
+        oidc-audience: ${{ inputs.oidc-audience }}
+
+    - name: Deploy preview
+      id: deploy
+      shell: bash
+      env:
+        PROJECT_PATH: ${{ inputs.project-path }}
+        TARGET_INPUT: ${{ inputs.target }}
+        PREVIEW_DATABASE: ${{ inputs.database }}
+        PREVIEW_SCHEMA: ${{ inputs.schema }}
+        REVIEWER_ROLE: ${{ inputs.reviewer-role }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        . "$GITHUB_ACTION_PATH/../../scripts/app-lib.sh"
+        export GHA_SUMMARY_FILE="${RUNNER_TEMP}/sar-preview-summary.md"
+        echo "GHA_SUMMARY_FILE=$GHA_SUMMARY_FILE" >> "$GITHUB_ENV"
+        : > "$GHA_SUMMARY_FILE"
+
+        if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+          echo "::error::app/preview runs only on pull_request events."
+          exit 1
+        fi
+        if [[ "$PREVIEW_DATABASE" == USER\$* ]]; then
+          echo "::error::Previews can't use a personal database: other roles can't open apps in USER\$."
+          exit 1
+        fi
+        IDENT='^[A-Za-z_][A-Za-z0-9_$]*$'
+        for v in "$PREVIEW_DATABASE" "$PREVIEW_SCHEMA" ${REVIEWER_ROLE:+"$REVIEWER_ROLE"}; do
+          [[ "$v" =~ $IDENT ]] || { echo "::error::Not a plain identifier: $v"; exit 1; }
+        done
+
+        DIR="$(app_copy_project "$PROJECT_PATH")"
+        cd "$DIR"
+        TARGET="$(app_resolve_target "$TARGET_INPUT")"
+        app_check_manifest "$TARGET"
+        app_apply_preview "$TARGET" "$PR_NUMBER" "$PREVIEW_DATABASE" "$PREVIEW_SCHEMA"
+
+        SERVICE="$(app_service_fqn "")"
+        echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+        app_run_deploy "Preview for PR #$PR_NUMBER"
+
+        if [ -n "$REVIEWER_ROLE" ]; then
+          snow sql -x -q "GRANT USAGE ON APPLICATION SERVICE $SERVICE TO ROLE $REVIEWER_ROLE" > /dev/null
+        fi
+        URL="$(snow app open --print-only -x 2>/dev/null)"
+        echo "url=$URL" >> "$GITHUB_OUTPUT"
+        gha_summary_line "**Preview:** $URL (\`$(app_live_version "$SERVICE")\`). It stops after an idle hour and starts again on the next visit."
+
+    - name: Comment on PR
+      if: always()
+      uses: actions/github-script@v8
+      with:
+        script: |
+          const { postSummaryComment } = require(`${process.env.GITHUB_ACTION_PATH}/../../scripts/pr-comment.js`);
+          await postSummaryComment(github, context, process.env.GHA_SUMMARY_FILE, 'Could not read preview summary.', 'sar-preview');
